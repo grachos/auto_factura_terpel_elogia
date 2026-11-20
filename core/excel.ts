@@ -183,3 +183,35 @@ export async function generateExport(
     return { status: 'failed', exportId: null };
   }
 }
+
+/** Relee un .xlsx y lo compara campo a campo con las filas de la BD. Devuelve las diferencias (vacío = concuerda). */
+export async function compareWorkbookWithRows(file: Buffer, rows: BatchRow[]): Promise<string[]> {
+  const diffs: string[] = [];
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(file as unknown as ArrayBuffer);
+  const ws = wb.getWorksheet('Servicios');
+  if (!ws) return ['Falta la hoja "Servicios"'];
+  if (!wb.getWorksheet('Incidencias')) diffs.push('Falta la hoja "Incidencias"');
+  if (!wb.getWorksheet('Resumen')) diffs.push('Falta la hoja "Resumen"');
+  if (ws.rowCount - 1 !== rows.length) diffs.push(`Filas: Excel ${ws.rowCount - 1} vs BD ${rows.length}`);
+  rows.forEach((r, i) => {
+    SERVICE_COLUMNS.forEach((col, j) => {
+      const cell = ws.getRow(i + 2).getCell(j + 1);
+      const expected = col.value(r);
+      const where = `${r.business_key}/${col.key}`;
+      if (expected === null || expected === '') {
+        if (cell.value !== null && cell.value !== undefined) diffs.push(`${where}: se esperaba vacío`);
+        return;
+      }
+      let actual: string;
+      if (col.type === 'dec4') actual = Number(cell.value).toFixed(4);
+      else if (col.type === 'int') actual = String(Number(cell.value));
+      else if (col.type === 'date') actual = cell.value instanceof Date ? cell.value.toISOString().slice(0, 10) : String(cell.value);
+      else actual = typeof cell.value === 'string' ? cell.value : `<${typeof cell.value}>`;
+      const exp = col.type === 'dec4' ? Number(expected).toFixed(4) : col.type === 'int' ? String(Number(expected)) : String(expected);
+      if (actual !== exp) diffs.push(`${where}: Excel "${actual}" vs BD "${exp}"`);
+      if (col.type === 'text' && cell.numFmt !== '@') diffs.push(`${where}: la celda no es de tipo texto`);
+    });
+  });
+  return diffs;
+}
