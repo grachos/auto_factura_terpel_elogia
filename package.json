@@ -4,20 +4,23 @@
   "private": true,
   "type": "module",
   "description": "AutoFactura Terpel - Fase 1: importar correos de autorización, Excel y persistencia",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "concurrently -k -n api,web \"npm:dev:api\" \"npm:dev:web\"",
-    "dev:api": "tsx watch server/index.ts",
+    "dev:api": "tsx watch --env-file-if-exists=.env server/index.ts",
     "dev:web": "vite",
     "build": "vite build",
-    "start": "tsx server/index.ts",
+    "start": "tsx --env-file-if-exists=.env server/index.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p web/tsconfig.json",
     "lint": "eslint .",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "demo:twice": "tsx scripts/demo-twice.ts",
-    "graph:check": "tsx scripts/graph-check.ts",
-    "db:migrate": "tsx scripts/migrate.ts"
+    "graph:check": "tsx --env-file-if-exists=.env scripts/graph-check.ts",
+    "db:migrate": "tsx --env-file-if-exists=.env scripts/migrate.ts",
+    "demo": "npm run build && AUTH_MODE=demo MAIL_SOURCE=mock npm start"
   },
   "dependencies": {
     "@azure/msal-node": "^2.16.2",
