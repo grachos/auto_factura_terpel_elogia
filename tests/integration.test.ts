@@ -181,6 +181,26 @@ describe('importación de punta a punta (PGlite + migraciones SQL reales)', () =
     expect(ws.getRow(vi + 2).getCell(colIndex('transport_volume_raw')).value).toBe('9973,0000');
     expect(Number(ws.getRow(vi + 2).getCell(colIndex('transport_volume')).value)).toBe(9973);
 
+    // Verificación independiente (SQL directo, sin getBatchRows): mismas filas y valores vigentes
+    const distinctSvc = await count(
+      db,
+      '(select distinct a.service_id from run_messages rm join authorizations a on a.message_id = rm.message_id' +
+        ` where rm.run_id = '${run1Id}' and a.service_id is not null) t`,
+    );
+    expect(ws.rowCount - 1).toBe(distinctSvc);
+    for (let r = 2; r <= ws.rowCount; r += 1) {
+      const key = String(ws.getRow(r).getCell(colIndex('business_key')).value);
+      const direct = (await db.query<{ transport_number: string; net_value: string; transport_volume_raw: string | null }>(
+        `select a.transport_number, a.net_value::text as net_value, a.transport_volume_raw
+           from services s join authorizations a on a.id = s.current_authorization_id where s.business_key = $1`,
+        [key],
+      )).rows[0]!;
+      expect(ws.getRow(r).getCell(colIndex('transport_number')).value).toBe(direct.transport_number);
+      expect(Number(ws.getRow(r).getCell(colIndex('net_value')).value).toFixed(4)).toBe(Number(direct.net_value).toFixed(4));
+      const rawCell = ws.getRow(r).getCell(colIndex('transport_volume_raw')).value;
+      expect(rawCell ?? null).toBe(direct.transport_volume_raw === '' ? null : direct.transport_volume_raw);
+    }
+
     const wi = wb.getWorksheet('Incidencias')!;
     expect(wi.rowCount - 1).toBe(exp.rows[0]!.issue_count);
     const wr = wb.getWorksheet('Resumen')!;
@@ -341,6 +361,21 @@ describe('reanudación y exportación (criterios 7 y 9)', () => {
     expect(await count(db4, 'services')).toBe(1);
     expect(await count(db4, 'import_issues', `code = 'DMARC_NOT_PASS'`)).toBe(1);
     await db4.close();
+  });
+
+  it('segunda clave de identidad: mismo Message-ID con otro id inmutable → duplicado', async () => {
+    const db6 = await newDb();
+    const original = fx.byName.valid!;
+    const d1 = deps(db6, new MockMailSource([original]), new MemoryStorage());
+    const r1 = await runToCompletion(d1, (await createRun(d1, JAN)).id, 'tester', noSleep);
+    expect(r1).toMatchObject({ found: 1, imported: 1, duplicates: 0 });
+    const moved = { ...original, id: 'AAMkOtroIdInmutable-movido-de-carpeta' };
+    const d2 = deps(db6, new MockMailSource([moved]), new MemoryStorage());
+    const r2 = await runToCompletion(d2, (await createRun(d2, JAN)).id, 'tester', noSleep);
+    expect(r2).toMatchObject({ found: 1, imported: 0, duplicates: 1 });
+    expect(await count(db6, 'source_messages')).toBe(1);
+    expect(await count(db6, 'authorizations')).toBe(1);
+    await db6.close();
   });
 
   it('estrategia de clave transporte+gasto', async () => {

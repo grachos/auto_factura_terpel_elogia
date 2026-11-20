@@ -63,7 +63,9 @@ describe('API (despachador común Fastify/Vercel)', () => {
     expect(((await call('GET', '/api/me', { token: viewer })).json as MeDto).role).toBe('viewer');
     expect((await call('POST', '/api/runs', { token: viewer, body: { dateFrom: '2026-01-01', dateTo: '2026-01-31' } })).status).toBe(403);
     expect((await call('GET', '/api/runs', { token: viewer })).status).toBe(200);
-    const cfg = (await call('GET', '/api/mail-config', { token: operator })).json as MailConfigDto;
+    expect((await call('GET', '/api/mail-config', { token: operator })).status).toBe(403);
+    expect((await call('GET', '/api/mail-config', { token: viewer })).status).toBe(403);
+    const cfg = (await call('GET', '/api/mail-config', { token: admin })).json as MailConfigDto;
     const put = { ...cfg, subjectPattern: 'otro patrón' };
     expect((await call('PUT', '/api/mail-config', { token: operator, body: put })).status).toBe(403);
     expect((await call('PUT', '/api/mail-config', { token: viewer, body: put })).status).toBe(403);

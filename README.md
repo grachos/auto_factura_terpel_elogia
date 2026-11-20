@@ -171,7 +171,7 @@ Ver [`.env.example`](.env.example) (sin valores reales). Las principales: `AUTH_
 - **Volumen**: se guardan el texto original y el valor numérico; `transport_volume_unit = NULL` y `unit_status = 'pending_confirmation'`. **Sin conversión de unidades.**
 - **Planta 9P**: solo marca `loading_plant_flag = '9P'`; sin regla de cliente en esta fase.
 - **Campos obligatorios** (incidencia si faltan o vienen vacíos): número de transporte, fecha del servicio (`DD.MM.AAAA`), valor neto y moneda, placa y volumen.
-- **Excel**: hoja *Servicios* (una fila por servicio del lote, con su versión vigente; identificadores como texto, decimales numéricos con 4 cifras, volumen también como texto original), *Incidencias* y *Resumen* (metadatos, contadores y huella sha256 del contenido; la huella del archivo completo queda en `export_files.sha256`). El lote incluye los servicios de mensajes importados **y** duplicados del rango, de modo que repetir una ejecución produce el mismo contenido.
+- **Excel**: hoja *Servicios* (una fila por servicio del lote, con su versión vigente; identificadores como texto, decimales numéricos con 4 cifras, volumen también como texto original), *Incidencias* y *Resumen* (metadatos, contadores y huella sha256 del contenido; la huella del archivo completo queda en `export_files.sha256`). El lote incluye los servicios de mensajes importados **y** duplicados del rango, así que repetir una ejecución produce los mismos servicios y valores; en cambio la columna "Resultado en la ejecución", el conteo de incidencias, la hoja *Incidencias* y los contadores del *Resumen* reflejan **solo esa ejecución** (en la segunda todo figura como duplicado y sin incidencias).
 
 ## Probado vs. pendiente de verificar
 
@@ -198,6 +198,7 @@ Ver [`.env.example`](.env.example) (sin valores reales). Las principales: `AUTH_
 | **Informe Silogtran y su documentación** | No disponible; es insumo de la Fase 2 (no implementada). |
 | **Supabase real** | Las migraciones se verificaron en PGlite (PostgreSQL embebido), no en un proyecto Supabase ni con Supabase CLI/Docker (no disponible en el entorno de desarrollo). Pendientes: `supabase db push`, el adaptador `SupabaseStorage` (subida y URL firmada), la verificación de JWT con tokens reales/JWKS y el adaptador `pg` contra un servidor real. |
 | **Despliegue en Vercel** | La función `api/[...path].ts` compila y comparte el despachador con Fastify (probado), pero no se desplegó. Confirmar límites de duración del plan. |
+| **Excel de una re-ejecución** | Comportamiento documentado de la Fase 1: el Excel de una ejecución repetida no arrastra las incidencias de la primera. Quien descargue solo el Excel de la re-ejecución verá, p. ej., la corrección con valores distintos (clave 000125) como duplicado y sin incidencias, aunque sigue requiriendo revisión. Ver siempre el Excel de la ejecución original o la pantalla de incidencias. Posible mejora: arrastrar las incidencias abiertas de las autorizaciones del lote. |
 | **Retención y datos personales** | Plazo de retención del cuerpo de los correos y de datos de conductores por definir con jurídica. |
 | **Rendimiento con volumen real** | No medido; el diseño asume páginas de 50 mensajes por paso. |
 

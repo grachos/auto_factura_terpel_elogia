@@ -165,7 +165,10 @@ async function dispatch(ctx: AppContext, req: HttpRequest, setRoute: (r: string)
   }
 
   if (a === 'mail-config' && parts.length === 1) {
-    if (is('GET', '/mail-config')) return ok(await getMailConfigDto(ctx.db));
+    if (is('GET', '/mail-config')) {
+      requireRole(session, ['admin']); // misma regla que RLS: mail_configs solo para administradores
+      return ok(await getMailConfigDto(ctx.db));
+    }
     if (is('PUT', '/mail-config')) {
       requireRole(session, ['admin']);
       const body = asObject(req.body);
