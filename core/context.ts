@@ -52,6 +52,31 @@ async function buildMail(config: AppConfig): Promise<MailSource> {
 }
 
 /** Construye dependencias según variables de entorno. Sin DATABASE_URL usa PGlite embebido (demo/local). */
+/**
+ * Conecta a PostgreSQL. Si el pooler compartido de Supabase responde "tenant not found" (XX000),
+ * prueba los demás grupos del pooler de la misma región (aws-0, aws-1, aws-2) y usa el que funcione.
+ */
+async function connectPg(url: string): Promise<Db> {
+  const candidates = [url];
+  const m = /@aws-(\d+)-([a-z0-9-]+)\.pooler\.supabase\.com/.exec(url);
+  if (m) {
+    for (const n of ['0', '1', '2']) if (n !== m[1]) candidates.push(url.replace(`@aws-${m[1]}-`, `@aws-${n}-`));
+  }
+  let lastErr: unknown;
+  for (const candidate of candidates) {
+    const db = createPgDb(candidate);
+    try {
+      await db.query('select 1');
+      return db;
+    } catch (e) {
+      lastErr = e;
+      await db.close().catch(() => undefined);
+      if ((e as { code?: unknown }).code !== 'XX000') break;
+    }
+  }
+  throw lastErr;
+}
+
 /** Error de arranque con la etapa que falló y un código técnico sin datos sensibles. */
 export class StartupError extends Error {
   constructor(
@@ -80,7 +105,7 @@ export async function createContext(env: Record<string, string | undefined> = pr
   const config = loadConfig(env);
   let db: Db;
   if (config.databaseUrl) {
-    db = createPgDb(config.databaseUrl);
+    db = await stage('db', () => connectPg(config.databaseUrl as string));
   } else {
     const { createPgliteDb } = await import('./db/pglite.js');
     const dir = resolve(config.dataDir, 'pglite');
