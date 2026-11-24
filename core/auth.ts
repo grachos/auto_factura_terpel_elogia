@@ -15,23 +15,42 @@ export interface AuthVerifier {
   demoLogin?(email: string, password: string): Promise<{ token: string; user: AuthUser } | null>;
 }
 
-/** Valida el JWT de Supabase Auth (HS256 con secreto, o JWKS para claves asimétricas). */
-export function createSupabaseVerifier(opts: { url: string; jwtSecret: string }): AuthVerifier {
+/**
+ * Valida el JWT de Supabase Auth. Con SUPABASE_JWT_SECRET verifica HS256 localmente; sin él, intenta JWKS
+ * (claves asimétricas) y, si no aplica, consulta GET /auth/v1/user con la clave pública (anon/publishable).
+ */
+export function createSupabaseVerifier(opts: { url: string; jwtSecret: string; anonKey?: string; fetchFn?: typeof fetch }): AuthVerifier {
   const secret = opts.jwtSecret ? new TextEncoder().encode(opts.jwtSecret) : null;
-  const jwks = !secret && opts.url ? createRemoteJWKSet(new URL(`${opts.url.replace(/\/$/, '')}/auth/v1/.well-known/jwks.json`)) : null;
+  const base = opts.url.replace(/\/$/, '');
+  const jwks = !secret && base ? createRemoteJWKSet(new URL(`${base}/auth/v1/.well-known/jwks.json`)) : null;
+  const doFetch = opts.fetchFn ?? fetch;
+  const fromPayload = (payload: { sub?: unknown; role?: unknown; email?: unknown }): AuthUser | null =>
+    typeof payload.sub !== 'string' || payload.role === 'anon'
+      ? null
+      : { id: payload.sub, email: typeof payload.email === 'string' ? payload.email : null };
   return {
     mode: 'supabase',
     async verify(token) {
+      if (secret) {
+        try {
+          return fromPayload((await jwtVerify(token, secret, { algorithms: ['HS256'] })).payload);
+        } catch {
+          return null;
+        }
+      }
+      if (jwks) {
+        try {
+          return fromPayload((await jwtVerify(token, jwks)).payload);
+        } catch {
+          // token HS256 o JWKS vacío: se valida contra el servidor de Auth
+        }
+      }
+      if (!base || !opts.anonKey) return null;
       try {
-        const { payload } = secret
-          ? await jwtVerify(token, secret, { algorithms: ['HS256'] })
-          : jwks
-            ? await jwtVerify(token, jwks)
-            : (() => {
-                throw new Error('sin configuración de verificación JWT');
-              })();
-        if (typeof payload.sub !== 'string' || payload.role === 'anon') return null;
-        return { id: payload.sub, email: typeof payload.email === 'string' ? payload.email : null };
+        const res = await doFetch(`${base}/auth/v1/user`, { headers: { apikey: opts.anonKey, Authorization: `Bearer ${token}` } });
+        if (!res.ok) return null;
+        const u = (await res.json()) as { id?: unknown; email?: unknown; role?: unknown };
+        return fromPayload({ sub: u.id, email: u.email, role: u.role });
       } catch {
         return null;
       }

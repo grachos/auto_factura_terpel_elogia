@@ -170,3 +170,19 @@ describe('modo Supabase (JWT) y modo demo bloqueado', () => {
     expect(() => loadConfig({ AUTH_MODE: 'demo', VERCEL_ENV: 'production' })).toThrow();
   });
 });
+
+describe('verificación de sesión Supabase sin secreto (GET /auth/v1/user)', () => {
+  it('acepta el token que Auth reconoce y rechaza el resto', async () => {
+    const { createSupabaseVerifier } = await import('../core/auth.js');
+    const fetchFn = (async (_url: string, init?: { headers?: Record<string, string> }) => {
+      const ok = init?.headers?.Authorization === 'Bearer bueno';
+      return new Response(ok ? JSON.stringify({ id: 'u1', email: 'a@b.co', role: 'authenticated' }) : '{}', { status: ok ? 200 : 401 });
+    }) as unknown as typeof fetch;
+    const v = createSupabaseVerifier({ url: '', jwtSecret: '', anonKey: 'k', fetchFn });
+    expect(await v.verify('bueno')).toBeNull(); // sin URL no hay verificación
+    const v2 = createSupabaseVerifier({ url: 'https://x.supabase.co', jwtSecret: '', anonKey: 'k', fetchFn });
+    // JWKS no es alcanzable en pruebas: cae al endpoint de Auth
+    expect(await v2.verify('bueno')).toEqual({ id: 'u1', email: 'a@b.co' });
+    expect(await v2.verify('malo')).toBeNull();
+  });
+});

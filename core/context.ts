@@ -83,7 +83,7 @@ export async function createContext(env: Record<string, string | undefined> = pr
     await seedDemoUsers(db);
     auth = createDemoVerifier(config.demoJwtSecret);
   } else {
-    auth = createSupabaseVerifier({ url: config.supabase.url, jwtSecret: config.supabase.jwtSecret });
+    auth = createSupabaseVerifier({ url: config.supabase.url, jwtSecret: config.supabase.jwtSecret, anonKey: config.supabase.anonKey });
   }
   return { config, db, mail: await buildMail(config), storage, auth };
 }
