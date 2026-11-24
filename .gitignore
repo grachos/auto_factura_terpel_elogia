@@ -8,3 +8,11 @@ test-results
 playwright-report
 *.log
 .vercel
+
+# Certificados y claves privadas (nunca al repositorio)
+*.pem
+*.key
+*.pfx
+*.p12
+*.cer
+secrets/
