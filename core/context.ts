@@ -52,6 +52,30 @@ async function buildMail(config: AppConfig): Promise<MailSource> {
 }
 
 /** Construye dependencias según variables de entorno. Sin DATABASE_URL usa PGlite embebido (demo/local). */
+/** Error de arranque con la etapa que falló y un código técnico sin datos sensibles. */
+export class StartupError extends Error {
+  constructor(
+    readonly stage: string,
+    readonly detailCode: string,
+  ) {
+    super(`Fallo de arranque en ${stage} (${detailCode})`);
+  }
+}
+
+async function stage<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    const err = e as { code?: unknown; name?: unknown; message?: unknown };
+    const code = typeof err.code === 'string' ? err.code : typeof err.name === 'string' ? err.name : 'UNKNOWN';
+    // Mensaje truncado y sin URLs/credenciales para el log del servidor.
+    const msg = typeof err.message === 'string' ? err.message.replace(/\S+:\/\/\S+/g, '<url>').slice(0, 160) : '';
+    // eslint-disable-next-line no-console
+    console.error(JSON.stringify({ event: 'startup_failed', stage: name, code, msg }));
+    throw new StartupError(name, code);
+  }
+}
+
 export async function createContext(env: Record<string, string | undefined> = process.env): Promise<AppContext> {
   const config = loadConfig(env);
   let db: Db;
@@ -63,7 +87,7 @@ export async function createContext(env: Record<string, string | undefined> = pr
     mkdirSync(dir, { recursive: true });
     db = await createPgliteDb(env.PGLITE_MEMORY === '1' ? undefined : dir);
   }
-  await ensureMailConfig(db, config);
+  await stage('db', () => ensureMailConfig(db, config));
 
   let storage: StorageAdapter;
   if (config.storageDriver === 'supabase') {
@@ -85,5 +109,6 @@ export async function createContext(env: Record<string, string | undefined> = pr
   } else {
     auth = createSupabaseVerifier({ url: config.supabase.url, jwtSecret: config.supabase.jwtSecret, anonKey: config.supabase.anonKey });
   }
-  return { config, db, mail: await buildMail(config), storage, auth };
+  const mail = await stage('mail', () => buildMail(config));
+  return { config, db, mail, storage, auth };
 }

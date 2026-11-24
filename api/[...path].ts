@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { createContext } from '../core/context.js';
+import { StartupError, createContext } from '../core/context.js';
 import type { AppContext } from '../core/context.js';
 import { handleNode } from '../core/http/node.js';
 
@@ -12,9 +12,10 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   try {
     ctxPromise ??= createContext();
     await handleNode(await ctxPromise, req, res);
-  } catch {
+  } catch (e) {
     ctxPromise = null;
+    const startup = e instanceof StartupError ? { stage: e.stage, detail: e.detailCode } : {};
     res.writeHead(500, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: { code: 'INTERNAL', message: 'Error interno del servidor' } }));
+    res.end(JSON.stringify({ error: { code: 'INTERNAL', message: 'Error interno del servidor', ...startup } }));
   }
 }
