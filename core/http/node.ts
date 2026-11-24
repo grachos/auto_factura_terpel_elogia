@@ -43,6 +43,10 @@ export function sendResponse(res: ServerResponse, out: HttpResponse): void {
 export async function handleNode(ctx: AppContext, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const query: Record<string, string> = {};
+  // En Vercel, /api/* se reescribe a /api?__path=<ruta original>.
+  const rewritten = url.searchParams.get('__path');
+  if (rewritten && rewritten.startsWith('/api')) url.pathname = rewritten;
+  url.searchParams.delete('__path');
   url.searchParams.forEach((v, k) => {
     query[k] = v;
   });
