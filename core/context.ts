@@ -11,6 +11,7 @@ import { GraphMailSource, createMsalTokenProvider } from './mail/graph.js';
 import { MockMailSource } from './mail/mock.js';
 import type { MailSource } from './mail/types.js';
 import { FsStorage } from './storage/fs.js';
+import { DbStorage } from './storage/db.js';
 import { SupabaseStorage } from './storage/supabase.js';
 import type { StorageAdapter } from './storage/types.js';
 
@@ -68,6 +69,9 @@ export async function createContext(env: Record<string, string | undefined> = pr
   if (config.storageDriver === 'supabase') {
     if (!config.supabase.url || !config.supabase.serviceRoleKey) throw new Error('Faltan SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY');
     storage = new SupabaseStorage(config.supabase.url, config.supabase.serviceRoleKey);
+  } else if (config.storageDriver === 'db') {
+    if (!config.filesSigningSecret) throw new Error('Falta FILES_SIGNING_SECRET');
+    storage = new DbStorage(db, config.filesSigningSecret);
   } else {
     const root = join(resolve(config.dataDir), 'storage', 'exports');
     mkdirSync(root, { recursive: true });

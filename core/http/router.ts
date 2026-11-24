@@ -7,7 +7,7 @@ import { log } from '../logger.js';
 import { audit } from '../audit.js';
 import { createRun, stepRun } from '../orchestrator.js';
 import { getMailConfigDto, getRunDetail, getRunExports, listRunDtos } from '../queries.js';
-import { FsStorage } from '../storage/fs.js';
+import { SignedUrlStorage } from '../storage/fs.js';
 import { SIGNED_URL_TTL_SECONDS } from '../storage/types.js';
 import type { ApiErrorDto, MailConfigDto, MeDto, PublicConfigDto, Role } from '../types.js';
 import { sqlState } from '../db/types.js';
@@ -139,7 +139,7 @@ async function dispatch(ctx: AppContext, req: HttpRequest, setRoute: (r: string)
   }
 
   if (a === 'files' && parts.length === 1 && is('GET', '/files')) {
-    if (!(ctx.storage instanceof FsStorage)) throw new AppError(404, 'NOT_FOUND', 'No encontrado');
+    if (!(ctx.storage instanceof SignedUrlStorage)) throw new AppError(404, 'NOT_FOUND', 'No encontrado');
     const p = req.query.p ?? '';
     if (!ctx.storage.verify(p, Number(req.query.exp), req.query.sig ?? '')) {
       throw new AppError(403, 'LINK_EXPIRED', 'El enlace de descarga venció o no es válido');

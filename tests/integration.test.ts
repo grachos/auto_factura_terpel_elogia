@@ -387,3 +387,19 @@ describe('reanudación y exportación (criterios 7 y 9)', () => {
     await db5.close();
   });
 });
+
+describe('DbStorage (Excel guardado en PostgreSQL)', () => {
+  it('guarda, lee y firma URLs que vencen', async () => {
+    const { DbStorage } = await import('../core/storage/db.js');
+    const db = await newDb();
+    const st = new DbStorage(db, 'secreto-de-prueba');
+    const data = Buffer.from([0, 1, 2, 255]);
+    await st.put('lote/a.xlsx', data, 'application/octet-stream');
+    expect(Buffer.compare(await st.get('lote/a.xlsx'), data)).toBe(0);
+    const url = new URL(await st.signedUrl('lote/a.xlsx', 60), 'http://x');
+    const p = url.searchParams.get('p') ?? '';
+    expect(st.verify(p, Number(url.searchParams.get('exp')), url.searchParams.get('sig') ?? '')).toBe(true);
+    expect(st.verify(p, Math.floor(Date.now() / 1000) - 1, url.searchParams.get('sig') ?? '')).toBe(false);
+    await expect(st.get('no-existe.xlsx')).rejects.toThrow();
+  });
+});

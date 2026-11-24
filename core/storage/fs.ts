@@ -5,29 +5,15 @@ import type { StorageAdapter } from './types.js';
 import { SIGNED_URL_TTL_SECONDS } from './types.js';
 
 /** Storage en sistema de archivos para demo/local. URLs firmadas con HMAC y expiración. */
-export class FsStorage implements StorageAdapter {
-  readonly kind = 'fs';
+/** Base con URLs firmadas HMAC servidas por /api/files (FsStorage y DbStorage). */
+export abstract class SignedUrlStorage implements StorageAdapter {
+  abstract readonly kind: string;
   constructor(
-    private readonly rootDir: string,
     private readonly signingSecret: string,
     private readonly publicBase = '/api/files',
   ) {}
-
-  private resolve(path: string): string {
-    const full = normalize(join(this.rootDir, path));
-    if (!full.startsWith(normalize(this.rootDir) + sep)) throw new Error('Ruta de almacenamiento inválida');
-    return full;
-  }
-
-  async put(path: string, data: Buffer): Promise<void> {
-    const full = this.resolve(path);
-    await mkdir(dirname(full), { recursive: true });
-    await writeFile(full, data);
-  }
-
-  async get(path: string): Promise<Buffer> {
-    return readFile(this.resolve(path));
-  }
+  abstract put(path: string, data: Buffer, contentType: string): Promise<void>;
+  abstract get(path: string): Promise<Buffer>;
 
   private sign(path: string, exp: number): string {
     return createHmac('sha256', this.signingSecret).update(`${path}\n${exp}`).digest('base64url');
@@ -45,5 +31,31 @@ export class FsStorage implements StorageAdapter {
     const expected = Buffer.from(this.sign(path, exp));
     const given = Buffer.from(sig);
     return expected.length === given.length && timingSafeEqual(expected, given);
+  }
+}
+
+export class FsStorage extends SignedUrlStorage {
+  readonly kind = 'fs';
+  constructor(
+    private readonly rootDir: string,
+    signingSecret: string,
+  ) {
+    super(signingSecret);
+  }
+
+  private resolve(path: string): string {
+    const full = normalize(join(this.rootDir, path));
+    if (!full.startsWith(normalize(this.rootDir) + sep)) throw new Error('Ruta de almacenamiento inválida');
+    return full;
+  }
+
+  async put(path: string, data: Buffer): Promise<void> {
+    const full = this.resolve(path);
+    await mkdir(dirname(full), { recursive: true });
+    await writeFile(full, data);
+  }
+
+  async get(path: string): Promise<Buffer> {
+    return readFile(this.resolve(path));
   }
 }

@@ -3,7 +3,7 @@ import type { BusinessKeyStrategy } from './businessKey.js';
 export interface AppConfig {
   authMode: 'demo' | 'supabase';
   mailSource: 'mock' | 'graph';
-  storageDriver: 'fs' | 'supabase';
+  storageDriver: 'fs' | 'supabase' | 'db';
   databaseUrl: string | null;
   dataDir: string;
   port: number;
@@ -24,6 +24,7 @@ export interface AppConfig {
   };
   supabase: { url: string; anonKey: string; serviceRoleKey: string; jwtSecret: string };
   demoJwtSecret: string;
+  filesSigningSecret: string;
 }
 
 type Env = Record<string, string | undefined>;
@@ -41,7 +42,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
   return {
     authMode,
     mailSource: env.MAIL_SOURCE === 'graph' ? 'graph' : 'mock',
-    storageDriver: env.STORAGE_DRIVER === 'supabase' ? 'supabase' : 'fs',
+    storageDriver: env.STORAGE_DRIVER === 'supabase' ? 'supabase' : env.STORAGE_DRIVER === 'db' ? 'db' : 'fs',
     databaseUrl: str(env.DATABASE_URL) || null,
     dataDir: str(env.DATA_DIR, '.data'),
     port: Number(str(env.PORT, '3000')),
@@ -67,5 +68,6 @@ export function loadConfig(env: Env = process.env): AppConfig {
       jwtSecret: str(env.SUPABASE_JWT_SECRET),
     },
     demoJwtSecret: str(env.DEMO_JWT_SECRET),
+    filesSigningSecret: str(env.FILES_SIGNING_SECRET),
   };
 }
