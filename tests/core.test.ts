@@ -195,3 +195,57 @@ describe('parser de la plantilla', () => {
     }
   });
 });
+
+describe('plantilla real: reenvío interno y variantes de formato', () => {
+  it('lee etiquetas abreviadas, "$" en el valor neto y etiquetas pegadas en la misma línea', async () => {
+    const { realFormatBody } = await import('../fixtures/realFormat.js');
+    for (const inline of [false, true]) {
+      const p = parseAuthorization({ contentType: 'text', content: realFormatBody({ transport: '6000000001', volumeInline: inline, volume: '9973,0000' }) });
+      expect(p.parseStatus).toBe('ok');
+      expect(p.issues).toEqual([]);
+      expect(p.purchaseDoc).toBe('4700000001');
+      expect(p.serviceEntrySheet).toBe('1000000001');
+      expect(p.netValue).toBe('4453353');
+      expect(p.netValueRaw).toBe('$4453353 COP');
+      expect(p.currency).toBe('COP');
+      expect(p.route).toBe('C00000-CIUDAD UNO - CIUDAD DOS');
+      expect(p.transportVolumeRaw).toBe('9973,0000');
+      expect(p.transportVolume).toBe('9973.0000');
+      expect(p.transportVolumeUnit).toBeNull();
+      expect(p.remissionNumber).toBeNull();
+      expect(p.rawFields.remission_number).toBe(''); // etiqueta presente y vacía
+      expect(p.loadingPlant).toBeNull();
+      expect(p.expenseNumber).toBe('0001234567');
+      expect(p.driverCode).toBe('0001112223');
+    }
+  });
+
+  it('distingue volumen cero de volumen vacío', async () => {
+    const { realFormatBody } = await import('../fixtures/realFormat.js');
+    const zero = parseAuthorization({ contentType: 'text', content: realFormatBody({ transport: '6000000002', volume: '0,0000' }) });
+    expect(zero.transportVolume).toBe('0.0000');
+    const empty = parseAuthorization({ contentType: 'text', content: realFormatBody({ transport: '6000000003', volume: '' }) });
+    expect(empty.transportVolume).toBeNull();
+    expect(empty.rawFields.transport_volume).toBe('');
+  });
+
+  it('confianza del remitente: directo, reenvío interno verificado y casos rechazados', async () => {
+    const { evaluateSenderTrust, quotedSenders } = await import('../core/subject.js');
+    const { realFormatBody, INTERNAL_FORWARDER } = await import('../fixtures/realFormat.js');
+    const body = realFormatBody({ transport: '6000000004' });
+    const base = { allowedSender: 'flota@informacion.terpel.com', allowedForwarders: [INTERNAL_FORWARDER], body };
+    expect(quotedSenders(body)).toContain('flota@informacion.terpel.com');
+    expect(evaluateSenderTrust({ ...base, from: 'FLOTA@informacion.terpel.com', sender: 'flota@informacion.terpel.com', isForward: false })).toEqual({ trusted: true, reason: 'direct' });
+    expect(evaluateSenderTrust({ ...base, from: INTERNAL_FORWARDER, sender: INTERNAL_FORWARDER, isForward: true })).toEqual({ trusted: true, reason: 'internal_forward' });
+    // no es reenvío (sin RE:/RV:/FW:)
+    expect(evaluateSenderTrust({ ...base, from: INTERNAL_FORWARDER, sender: INTERNAL_FORWARDER, isForward: false }).trusted).toBe(false);
+    // con lista de reenviadores configurada, solo esas cuentas
+    expect(evaluateSenderTrust({ ...base, from: 'otra.persona@empresa.example', sender: 'otra.persona@empresa.example', isForward: true }).trusted).toBe(false);
+    // sin lista (por defecto) lo reenvía cualquier cuenta mientras el "De:" citado sea Terpel
+    expect(evaluateSenderTrust({ ...base, allowedForwarders: [], from: 'cualquiera@otro.example', sender: 'cualquiera@otro.example', isForward: true })).toEqual({ trusted: true, reason: 'internal_forward' });
+    // el cuerpo no cita a Terpel
+    expect(evaluateSenderTrust({ ...base, body: body.replace(/flota@informacion\.terpel\.com/gi, 'otro@falso.example'), from: INTERNAL_FORWARDER, sender: INTERNAL_FORWARDER, isForward: true }).trusted).toBe(false);
+    // sin cita de Terpel en el cuerpo, ni con lista vacía
+    expect(evaluateSenderTrust({ ...base, allowedForwarders: [], body: body.replace(/flota@informacion\.terpel\.com/gi, 'otro@falso.example'), from: INTERNAL_FORWARDER, sender: INTERNAL_FORWARDER, isForward: true }).trusted).toBe(false);
+  });
+});

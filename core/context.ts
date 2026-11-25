@@ -26,9 +26,9 @@ export interface AppContext {
 export async function ensureMailConfig(db: Db, config: AppConfig): Promise<void> {
   const m = config.mail;
   await db.query(
-    `insert into mail_configs (mailbox, allowed_sender, subject_pattern, require_dmarc_pass, business_key_strategy)
-     values ($1,$2,$3,$4,$5) on conflict (mailbox) do nothing`,
-    [m.mailbox, m.allowedSender, m.subjectPattern, m.requireDmarcPass, m.businessKeyStrategy],
+    `insert into mail_configs (mailbox, allowed_sender, subject_pattern, require_dmarc_pass, business_key_strategy, allowed_forwarders)
+     values ($1,$2,$3,$4,$5,$6) on conflict (mailbox) do nothing`,
+    [m.mailbox, m.allowedSender, m.subjectPattern, m.requireDmarcPass, m.businessKeyStrategy, m.allowedForwarders],
   );
 }
 

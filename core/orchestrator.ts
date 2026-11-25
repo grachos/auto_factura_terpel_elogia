@@ -12,7 +12,7 @@ import type { MailMessage, MailSource } from './mail/types.js';
 import { CursorExpiredError, MailSourceError, ThrottledError } from './mail/types.js';
 import { parseAuthorization } from './parser.js';
 import type { ParsedAuthorization } from './parser.js';
-import { dmarcStatus, senderAllowed, subjectMatches } from './subject.js';
+import { dmarcStatus, evaluateSenderTrust, subjectMatches } from './subject.js';
 import type { StorageAdapter } from './storage/types.js';
 import type { Outcome, RunDto, StepResultDto } from './types.js';
 import { getRunDto } from './queries.js';
@@ -33,11 +33,12 @@ export interface MailConfigRow {
   subject_pattern: string;
   require_dmarc_pass: boolean;
   business_key_strategy: BusinessKeyStrategy;
+  allowed_forwarders: string[];
 }
 
 export async function getActiveMailConfig(q: Queryable): Promise<MailConfigRow> {
   const r = await q.query<MailConfigRow>(
-    `select id, mailbox, allowed_sender, subject_pattern, require_dmarc_pass, business_key_strategy
+    `select id, mailbox, allowed_sender, subject_pattern, require_dmarc_pass, business_key_strategy, allowed_forwarders
        from mail_configs where active order by updated_at desc limit 1`,
   );
   const row = r.rows[0];
@@ -123,7 +124,7 @@ export async function stepRun(deps: OrchestratorDeps, runId: string, actor: stri
   }
 
   const cfgRes = await deps.db.query<MailConfigRow>(
-    `select id, mailbox, allowed_sender, subject_pattern, require_dmarc_pass, business_key_strategy
+    `select id, mailbox, allowed_sender, subject_pattern, require_dmarc_pass, business_key_strategy, allowed_forwarders
        from mail_configs where id = $1`,
     [claimed.mail_config_id],
   );
@@ -232,7 +233,11 @@ interface Issue {
 
 async function processMessage(tx: Queryable, runId: string, cfg: MailConfigRow, msg: MailMessage): Promise<void> {
   const subj = subjectMatches(msg.subject, cfg.subject_pattern);
-  const allowed = senderAllowed(msg.from, msg.sender, cfg.allowed_sender);
+  const trust = evaluateSenderTrust({
+    from: msg.from, sender: msg.sender, allowedSender: cfg.allowed_sender,
+    allowedForwarders: cfg.allowed_forwarders ?? [], isForward: subj.isForward, body: msg.bodyContent,
+  });
+  const allowed = trust.trusted;
   const dmarc = dmarcStatus(msg.authenticationResults);
   const bodySha = createHash('sha256').update(msg.bodyContent).digest('hex');
   const ignored = !subj.matches || (!allowed && !subj.isForward);
@@ -301,6 +306,12 @@ async function processMessage(tx: Queryable, runId: string, cfg: MailConfigRow, 
 
   const parsed = parseAuthorization({ contentType: msg.bodyContentType, content: msg.bodyContent });
   const issues: Issue[] = parsed.issues.map((i) => ({ code: i.code, severity: i.severity, field: i.field, detail: i.detail }));
+  if (trust.reason === 'internal_forward') {
+    issues.push({
+      code: 'FORWARDED_BY_INTERNAL_ACCOUNT', severity: 'info', field: null,
+      detail: `Reenviado por ${msg.from ?? 'cuenta desconocida'}; el remitente original de Terpel se leyó del texto citado "De:" (no autenticado)`,
+    });
+  }
   const key = parsed.parseStatus === 'error' ? null : buildBusinessKey(cfg.business_key_strategy, parsed);
   if (parsed.parseStatus !== 'error' && key === null) {
     issues.push({ code: 'MISSING_BUSINESS_KEY', severity: 'error', field: null, detail: 'No se pudo construir la clave de negocio' });

@@ -403,3 +403,55 @@ describe('DbStorage (Excel guardado en PostgreSQL)', () => {
     await expect(st.get('no-existe.xlsx')).rejects.toThrow();
   });
 });
+
+describe('reenvíos internos (formato real)', () => {
+  it("importa los reenvíos (De: citado = Terpel) y deja visible quién reenvió", async () => {
+    const { internalForward, INTERNAL_FORWARDER } = await import('../fixtures/realFormat.js');
+    const msgs = [
+      internalForward('1', '6000000011'),
+      internalForward('2', '6000000012', {}, { volumeInline: true, volume: '10075,0000' }),
+      internalForward('3', '6000000013', { receivedDateTime: '2026-01-16T14:00:00Z' }),
+      // misma autorización reenviada otra vez: no crea un segundo servicio
+      internalForward('4', '6000000011', { receivedDateTime: '2026-01-17T14:00:00Z' }),
+      // con lista de reenviadores configurada, otra cuenta queda en revisión sin crear servicio
+      internalForward('5', '6000000015', { from: 'otra.persona@empresa.example', sender: 'otra.persona@empresa.example' }),
+    ];
+    const db = await newDb({ forwarders: [INTERNAL_FORWARDER] });
+    const d = deps(db, new MockMailSource(msgs, { pageSize: 10 }), new MemoryStorage());
+    const run = await createRun(d, JAN);
+    let r;
+    for (let i = 0; i < 10; i += 1) {
+      r = await stepRun(d, run.id, 'tester');
+      if (r.done) break;
+    }
+    expect(r!.run).toMatchObject({ status: 'completed', found: 5, imported: 4, needsReview: 1, duplicates: 0 });
+    expect(await count(db, 'services')).toBe(3);
+    expect(await count(db, 'import_issues', "code = 'SENDER_NOT_ALLOWED'")).toBe(1);
+    expect(await count(db, 'import_issues', "code = 'FORWARDED_BY_INTERNAL_ACCOUNT'")).toBe(4);
+    const a = await db.query<{ transport_volume: string; transport_volume_raw: string; net_value: string; purchase_doc: string }>(
+      `select transport_volume::text, transport_volume_raw, net_value::text, purchase_doc from authorizations where transport_number = '6000000012'`,
+    );
+    expect(a.rows[0]).toMatchObject({ transport_volume: '10075.0000', transport_volume_raw: '10075,0000', net_value: '4453353.0000', purchase_doc: '4700000001' });
+    await db.close();
+  });
+
+  it('sin lista de reenviadores (por defecto) acepta cualquier cuenta que reenvíe un correo de Terpel', async () => {
+    const { internalForward } = await import('../fixtures/realFormat.js');
+    const msgs = [
+      internalForward('21', '6000000021', { from: 'cualquiera@otro.example', sender: 'cualquiera@otro.example' }),
+      // reenvío cuyo cuerpo NO cita a Terpel: no se acepta
+      internalForward('22', '6000000022', { bodyContent: 'Esta es la información del servicio:\nNumero de transporte: 6000000022' }),
+    ];
+    const db = await newDb();
+    const d = deps(db, new MockMailSource(msgs, { pageSize: 10 }), new MemoryStorage());
+    const run = await createRun(d, JAN);
+    let r;
+    for (let i = 0; i < 10; i += 1) {
+      r = await stepRun(d, run.id, 'tester');
+      if (r.done) break;
+    }
+    expect(r!.run).toMatchObject({ status: 'completed', found: 2, imported: 1, needsReview: 1 });
+    expect(await count(db, 'services')).toBe(1);
+    await db.close();
+  });
+});

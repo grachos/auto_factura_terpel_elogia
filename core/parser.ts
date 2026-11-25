@@ -3,7 +3,7 @@ import type { Node as HtmlNode } from 'node-html-parser';
 import { parseServiceDate } from './dates.js';
 import { normalizeDecimal } from './decimal.js';
 
-export const PARSER_VERSION = '1.0.0';
+export const PARSER_VERSION = '1.1.0';
 export const BLOCK_MARKER = 'esta es la informacion del servicio';
 
 export type FieldKey =
@@ -35,8 +35,8 @@ export const FIELD_DEFS: FieldDef[] = [
   { key: 'expense_number', labels: ['Número de gasto', 'Nro de gasto', 'No. de gasto'], required: false },
   { key: 'service_date', labels: ['Fecha del servicio', 'Fecha de servicio'], required: true },
   { key: 'loading_plant', labels: ['Planta de cargue'], required: false },
-  { key: 'purchase_doc', labels: ['Documento de compras o contrato', 'Documento de compras'], required: false },
-  { key: 'service_entry_sheet', labels: ['Hoja de entrada de servicio', 'Hoja de entrada de servicios'], required: false },
+  { key: 'purchase_doc', labels: ['Documento de compras o contrato', 'Documento de compras', 'Doc. Compras (Contrato)', 'Doc. Compras', 'Doc Compras (Contrato)'], required: false },
+  { key: 'service_entry_sheet', labels: ['Hoja de entrada de servicio', 'Hoja de entrada de servicios', 'Hoja de Entrada de Serv', 'Hoja de Entrada de Serv.'], required: false },
   { key: 'net_value_currency', labels: ['Valor neto y moneda', 'Valor neto'], required: true },
   { key: 'plate', labels: ['Placa del vehículo', 'Placa'], required: true },
   { key: 'route', labels: ['Ruta'], required: false },
@@ -167,13 +167,43 @@ const LABEL_MATCHERS: { key: FieldKey; re: RegExp; len: number }[] = FIELD_DEFS.
   d.labels.map((l) => ({ key: d.key, re: labelRegex(l), len: l.length })),
 ).sort((a, b) => b.len - a.len);
 
+/** Etiquetas con ":" obligatorio para separar líneas que traen dos campos pegados ("Ruta: X Volumen del transporte: 1"). */
+const INLINE_SPLIT = new RegExp(
+  `\\s+(?=(?:${FIELD_DEFS.flatMap((d) => d.labels)
+    .map((l) => stripAccentsWithMap(l).text.trim().split(/\\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'))
+    .join('|')})\\s*[:：])`,
+  'gi',
+);
+
+/** Divide una línea en varias cuando contiene más de una etiqueta conocida. */
+function splitInlineLabels(line: string): string[] {
+  const { text, map } = stripAccentsWithMap(line);
+  const cuts: number[] = [];
+  for (const m of text.matchAll(INLINE_SPLIT)) {
+    if (m.index === undefined || m.index === 0) continue;
+    const end = m.index + m[0].length;
+    cuts.push(end >= map.length ? line.length : (map[end] ?? line.length));
+  }
+  if (cuts.length === 0) return [line];
+  const parts: string[] = [];
+  let prev = 0;
+  for (const c of cuts) {
+    parts.push(line.slice(prev, c));
+    prev = c;
+  }
+  parts.push(line.slice(prev));
+  return parts;
+}
+
 function cleanValue(s: string): string {
   return s.replace(/[\t ]+/g, ' ').trim();
 }
 
 function extractFields(lines: string[]): Record<FieldKey, string | null> {
   const result = Object.fromEntries(FIELD_DEFS.map((d) => [d.key, null])) as Record<FieldKey, string | null>;
-  for (const line of lines) {
+  const pending = [...lines];
+  while (pending.length > 0) {
+    const line = pending.shift() as string;
     const { text, map } = stripAccentsWithMap(line);
     for (const m of LABEL_MATCHERS) {
       if (result[m.key] !== null) continue;
@@ -181,7 +211,10 @@ function extractFields(lines: string[]): Record<FieldKey, string | null> {
       if (!hit) continue;
       const endStripped = hit[0].length;
       const origStart = endStripped >= map.length ? line.length : (map[endStripped] ?? line.length);
-      result[m.key] = cleanValue(line.slice(origStart));
+      // Solo se busca otra etiqueta DENTRO del valor ("Ruta: X Volumen del transporte: 1").
+      const [value = '', ...rest] = splitInlineLabels(line.slice(origStart));
+      result[m.key] = cleanValue(value);
+      pending.unshift(...rest);
       break;
     }
   }
@@ -313,7 +346,7 @@ export function parseAuthorization(input: ParseInput): ParsedAuthorization {
   base.netValueRaw = raw.net_value_currency;
   if (nz(raw.net_value_currency)) {
     const { amount, currency } = splitAmountCurrency(raw.net_value_currency ?? '');
-    base.netValue = decimalField('net_value_currency', amount);
+    base.netValue = decimalField('net_value_currency', amount.replace(/[$€£\s]/g, ''));
     base.currency = currency;
     if (!currency) {
       issues.push({ code: 'EMPTY_REQUIRED_FIELD', severity: 'error', field: 'net_value_currency', detail: 'No se identificó la moneda' });

@@ -26,12 +26,12 @@ export class MemoryStorage implements StorageAdapter {
   }
 }
 
-export async function newDb(config: { requireDmarc?: boolean; strategy?: string } = {}): Promise<Db> {
+export async function newDb(config: { requireDmarc?: boolean; strategy?: string; forwarders?: string[] } = {}): Promise<Db> {
   const db = await createPgliteDb();
   await db.query(
-    `insert into mail_configs (mailbox, allowed_sender, subject_pattern, require_dmarc_pass, business_key_strategy)
-     values ($1,$2,$3,$4,$5)`,
-    [MAILBOX, ALLOWED_SENDER, SUBJECT_PATTERN, config.requireDmarc ?? false, config.strategy ?? 'transport_number'],
+    `insert into mail_configs (mailbox, allowed_sender, subject_pattern, require_dmarc_pass, business_key_strategy, allowed_forwarders)
+     values ($1,$2,$3,$4,$5,$6)`,
+    [MAILBOX, ALLOWED_SENDER, SUBJECT_PATTERN, config.requireDmarc ?? false, config.strategy ?? 'transport_number', config.forwarders ?? []],
   );
   return db;
 }

@@ -216,11 +216,12 @@ interface ConfigRow {
   subject_pattern: string;
   require_dmarc_pass: boolean;
   business_key_strategy: 'transport_number' | 'transport_expense';
+  allowed_forwarders: string[];
 }
 
 export async function getMailConfigDto(q: Queryable): Promise<MailConfigDto> {
   const r = await q.query<ConfigRow>(
-    `select id, mailbox, allowed_sender, subject_pattern, require_dmarc_pass, business_key_strategy
+    `select id, mailbox, allowed_sender, subject_pattern, require_dmarc_pass, business_key_strategy, allowed_forwarders
        from mail_configs where active order by updated_at desc limit 1`,
   );
   const c = r.rows[0];
@@ -228,5 +229,6 @@ export async function getMailConfigDto(q: Queryable): Promise<MailConfigDto> {
   return {
     id: c.id, mailbox: c.mailbox, allowedSender: c.allowed_sender, subjectPattern: c.subject_pattern,
     requireDmarcPass: c.require_dmarc_pass, businessKeyStrategy: c.business_key_strategy,
+    allowedForwarders: c.allowed_forwarders ?? [],
   };
 }

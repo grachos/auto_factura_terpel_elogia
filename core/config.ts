@@ -10,6 +10,7 @@ export interface AppConfig {
   mail: {
     mailbox: string;
     allowedSender: string;
+    allowedForwarders: string[];
     subjectPattern: string;
     requireDmarcPass: boolean;
     businessKeyStrategy: BusinessKeyStrategy;
@@ -49,6 +50,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
     mail: {
       mailbox: str(env.MAIL_MAILBOX, 'autorizaciones-terpel@empresa.example'),
       allowedSender: str(env.MAIL_ALLOWED_SENDER, 'flota@informacion.terpel.com'),
+      allowedForwarders: str(env.MAIL_ALLOWED_FORWARDERS).split(/[,;\s]+/).map((x) => x.trim().toLowerCase()).filter(Boolean),
       subjectPattern: str(env.MAIL_SUBJECT_PATTERN, 'AUTORIZACION PAGO TERPEL - Facturacion de servicio'),
       requireDmarcPass: bool(env.MAIL_REQUIRE_DMARC_PASS, false),
       businessKeyStrategy: strategy,

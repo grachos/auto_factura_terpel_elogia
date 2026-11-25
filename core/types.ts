@@ -83,6 +83,7 @@ export interface MailConfigDto {
   subjectPattern: string;
   requireDmarcPass: boolean;
   businessKeyStrategy: 'transport_number' | 'transport_expense';
+  allowedForwarders: string[];
 }
 
 export interface MeDto {

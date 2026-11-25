@@ -49,6 +49,45 @@ export function senderAllowed(
   return a.length > 0 && normalizeEmail(from) === a && normalizeEmail(sender) === a;
 }
 
+/** Direcciones de las líneas "De:" / "From:" del texto citado en un reenvío (sin distinguir mayúsculas). */
+export function quotedSenders(body: string | null | undefined): string[] {
+  const out = new Set<string>();
+  for (const line of (body ?? '').replace(/<[^>]+>/g, ' ').split(/\r?\n/)) {
+    const m = /^\s*(?:de|from)\s*:\s*(.*)$/i.exec(stripAccents(line));
+    if (!m) continue;
+    for (const a of (m[1] ?? '').matchAll(/[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g)) out.add(normalizeEmail(a[0]));
+  }
+  return [...out];
+}
+
+export interface ForwardTrust {
+  trusted: boolean;
+  reason: 'direct' | 'internal_forward' | 'none';
+}
+
+/**
+ * Confianza en el remitente. Directo: from y sender son el remitente permitido. Reenvío: el mensaje es un
+ * reenvío (RV:/FW:/RE:) y el cuerpo citado muestra como remitente original ("De:") al permitido de Terpel;
+ * lo reenvíe quien lo reenvíe. Si `allowedForwarders` tiene cuentas, solo esas pueden reenviar; vacío = cualquiera.
+ * El texto citado no está autenticado: el reenviador queda registrado y la incidencia es visible.
+ */
+export function evaluateSenderTrust(opts: {
+  from: string | null | undefined;
+  sender: string | null | undefined;
+  allowedSender: string;
+  allowedForwarders: string[];
+  isForward: boolean;
+  body: string | null | undefined;
+}): ForwardTrust {
+  if (senderAllowed(opts.from, opts.sender, opts.allowedSender)) return { trusted: true, reason: 'direct' };
+  const forwarders = new Set(opts.allowedForwarders.map(normalizeEmail).filter(Boolean));
+  const forwarderOk = forwarders.size === 0 || forwarders.has(normalizeEmail(opts.from));
+  if (opts.isForward && forwarderOk && quotedSenders(opts.body).includes(normalizeEmail(opts.allowedSender))) {
+    return { trusted: true, reason: 'internal_forward' };
+  }
+  return { trusted: false, reason: 'none' };
+}
+
 export type DmarcStatus = 'pass' | 'fail' | 'none' | 'unknown';
 
 export function dmarcStatus(authResults: string | null | undefined): DmarcStatus {
