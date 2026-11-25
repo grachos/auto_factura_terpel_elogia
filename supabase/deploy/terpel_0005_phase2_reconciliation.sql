@@ -162,3 +162,12 @@ create policy read_place_aliases on terpel.place_aliases for select to authentic
 create policy read_recon_runs on terpel.reconciliation_runs for select to authenticated using (terpel.app_role() is not null);
 create policy read_recon_results on terpel.reconciliation_results for select to authenticated using (terpel.app_role() is not null);
 -- Escrituras (configuración solo admin, resoluciones por operador/admin) pasan por la API con service/owner role.
+
+-- apply_migration crea los objetos como "postgres": pasarlos al rol dueño que usa el backend.
+alter table terpel.silogtran_records owner to terpel_app;
+alter table terpel.silogtran_sync_log owner to terpel_app;
+alter table terpel.reconciliation_settings owner to terpel_app;
+alter table terpel.match_filters owner to terpel_app;
+alter table terpel.place_aliases owner to terpel_app;
+alter table terpel.reconciliation_runs owner to terpel_app;
+alter table terpel.reconciliation_results owner to terpel_app;
