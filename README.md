@@ -1,4 +1,4 @@
-# AutoFactura Terpel — Fase 1
+# AutoFactura Terpel — Fases 1 y 2
 
 Importa los correos de **autorización de pago** de Terpel desde un buzón, extrae los datos de cada servicio con reglas deterministas (sin IA), los guarda en PostgreSQL (Supabase) sin duplicados y genera un **Excel** del lote desde la base de datos.
 
@@ -155,9 +155,24 @@ npm run graph:check -- --denied  # buzón no autorizado → HTTP 403 ErrorAccess
 
 Sin credenciales, `graph:check` termina con un mensaje en español que lista las variables faltantes (código de salida 2). Con `graph:check` en verde, pruebe un rango corto desde la UI. Solo se hacen peticiones **GET**; no se modifican correos.
 
+## Fase 2 — Conciliar con Silogtran (solo lectura)
+
+La app compara cada servicio de Terpel (autorización vigente) con el informe de Silogtran. **Silogtran es solo lectura**: no hay ninguna llamada de escritura (los ajustes son la Fase 3, no implementada).
+
+- **Fuente**: `SilogtranSource` con `SilogtranApiSource` (login `servicio.Seguridad.login`, informe `servicio.Manifiesto.InformeGeneral`, cabecera `Authorization` con el token crudo, nuevo login ante 401, timeout de 20 s, errores sin credenciales) y `MockSilogtranSource` (datos sintéticos; modo demo sin credenciales). Variables solo de servidor: `SILOG_BASE_URL`, `SILOG_USER`, `SILOG_PASSWORD`, opcional `SILOG_TERPEL_NIT` (830095213). Sin ellas la API responde `SILOG_NOT_CONFIGURED` con un mensaje claro.
+- **Snapshot incremental**: la sincronización trae tramos de 7 días (medido: 1–3 s por tramo, ~1.200 filas) y hace upsert por (`manifiesto`, `remesa_codigo`) en `silogtran_records`; se deduplican las filas repetidas, se filtra por NIT y se excluye `ANULADO` al conciliar. Es reanudable e idempotente. Bitácora en `silogtran_sync_log`.
+- **Conciliación** (`POST /api/reconciliations` + `POST /api/reconciliations/:id/step`): sincroniza Silogtran desde `fecha_min − lookback` (15 días) hasta `fecha_max` y concilia en lotes de 150 servicios. Un resultado vigente por servicio (`reconciliation_results`); reconciliar de nuevo no duplica y conserva la elección manual.
+- **Cascada de filtros** (tabla `match_filters`, editable por admin): conductor (cédula sin ceros) → placa → ruta (con `place_aliases`) → fecha (`0 ≤ descargue − despacho ≤ N` días, N=10). Modo *excluyente* (0 candidatos ⇒ `NO_MATCH`) o *preferente* (si dejaría 0 se ignora y se anota). Por defecto: conductor, ruta y fecha excluyentes; placa preferente. Cada resultado guarda la traza `[{filter, before, after, mode, skipped}]`.
+- **Estados**: `EXACT`, `MATCH_WITH_DIFFERENCES` (solo diferencias `adjustable`: volumen Terpel vs `remesa_peso` —no se compara si Terpel trae 0— y valor neto vs `total_remesa`), `AMBIGUOUS` (nunca se elige al azar), `NO_MATCH` (normal si aún no se despachó), `INSUFFICIENT_DATA`. La placa distinta es solo informativa.
+- **Bandeja de revisión** (UI «Conciliación»): ver traza y diferencias, elegir candidato (operador/admin, auditado con usuario y fecha) y «Agregar equivalencia» de lugar (admin) que re-concilia el servicio. Excel (hojas *Conciliación*, *Incidencias*, *Resumen*) por el mismo `StorageAdapter`.
+- **Parámetros** (solo admin): equivalencias de lugares (CRUD), orden/activación/modo de filtros, ventana de días, lookback y NIT; todo con `audit_log`.
+- Migración `supabase/migrations/0005_phase2_reconciliation.sql`; equivalente para el Supabase compartido en `supabase/deploy/terpel_0005_phase2_reconciliation.sql` (esquema `terpel`, dueño `terpel_app`).
+
+Probar en demo: `npm run demo`, entrar como operador, importar enero de 2026 y abrir **Conciliación** (Silogtran simulado). Con credenciales reales: definir `SILOG_*` en `.env` (o en Vercel) y elegir un rango.
+
 ## Variables de entorno
 
-Ver [`.env.example`](.env.example) (sin valores reales). Las principales: `AUTH_MODE`, `MAIL_SOURCE`, `MAIL_MAILBOX`, `MAIL_ALLOWED_SENDER`, `MAIL_SUBJECT_PATTERN`, `MAIL_REQUIRE_DMARC_PASS`, `BUSINESS_KEY_STRATEGY`, `GRAPH_*`, `DATABASE_URL`, `STORAGE_DRIVER`, `SUPABASE_*`. Las variables `MAIL_*` solo siembran la primera configuración; luego un administrador la edita desde la UI.
+Ver [`.env.example`](.env.example) (sin valores reales). Las principales: `AUTH_MODE`, `MAIL_SOURCE`, `MAIL_MAILBOX`, `MAIL_ALLOWED_SENDER`, `MAIL_SUBJECT_PATTERN`, `MAIL_REQUIRE_DMARC_PASS`, `BUSINESS_KEY_STRATEGY`, `GRAPH_*`, `DATABASE_URL`, `STORAGE_DRIVER`, `SUPABASE_*`, `SILOG_*` (Fase 2). Las variables `MAIL_*` solo siembran la primera configuración; luego un administrador la edita desde la UI.
 
 ## Reglas de negocio implementadas
 
@@ -186,6 +201,8 @@ Ver [`.env.example`](.env.example) (sin valores reales). Las principales: `AUTH_
 - API: 401 sin sesión, roles, JWT HS256 tipo Supabase, demo-login bloqueado fuera de modo demo, URL firmada con expiración, logs sin cuerpos/tokens/conductores.
 - UI: smoke con Playwright (login, importación, resultados, incidencias, descarga, segunda importación = duplicados, roles).
 - `npm run demo:twice`.
+- Fase 2 (Vitest + PGlite con migraciones reales, datos sintéticos): normalizadores, motor de cascada (orden, activación, excluyente/preferente, ventana, AMBIGUOUS, NO_MATCH, INSUFFICIENT_DATA, volumen 0, diferencias, placa informativa), deduplicación/ANULADO/NIT, cliente de la API (token crudo, re-login, errores sin credenciales), sync idempotente, 6 casos reales reproducidos con datos inventados, endpoints con roles, auditoría, resolución manual, equivalencias y Excel que concuerda con la BD. Smoke e2e de Conciliación y Parámetros.
+- Fase 2 contra la API real de Silogtran (backend local con PGlite + los 6 servicios de Terpel ya importados, rango 17–25/11/2026): los 6 resultados coinciden con lo esperado (ver docs/diseno-arquitectura.md).
 
 ### Pendiente de verificar
 
@@ -197,7 +214,9 @@ Ver [`.env.example`](.env.example) (sin valores reales). Las principales: `AUTH_
 | **Clave de negocio** | Número de transporte (confirmado: el número de gasto siempre es distinto). |
 | **Volumen** | Unidad confirmada: galones. Frecuentemente viene en 0 (valor válido); en la Fase 2 no debe compararse en 0. |
 | **Planta de cargue** | No se evalúa (decisión del negocio). |
-| **Informe Silogtran y su documentación** | No disponible; es insumo de la Fase 2 (no implementada). |
+| **Informe Silogtran** | Fase 2 implementada y probada contra la API real desde el backend local. En producción (Vercel) la conciliación requiere que `SILOG_BASE_URL`, `SILOG_USER` y `SILOG_PASSWORD` estén definidas; si faltan la app responde `SILOG_NOT_CONFIGURED`. |
+| **Ajustes en Silogtran (Fase 3)** | No implementados (Silogtran solo lectura). |
+| **Ventana de días por ruta** | Ventana global (10 días, configurable); en los casos reales fue de 2 a 6. |
 | **Producción** | Desplegado en Vercel sobre el esquema `terpel` de un proyecto Supabase compartido; los Excel se guardan en PostgreSQL (`STORAGE_DRIVER=db`). El plan gratuito de Vercel no permite uso comercial: pasar a Pro antes del uso diario. |
 
 ## Seguridad y privacidad
