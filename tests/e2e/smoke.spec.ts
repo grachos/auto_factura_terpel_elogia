@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 
 test.describe.configure({ mode: 'serial' });
 
-async function loginAs(page: Page, role: 'operator' | 'admin' | 'viewer'): Promise<void> {
+async function loginAs(page: Page, role: 'operator' | 'admin' | 'viewer' | 'facturacion'): Promise<void> {
   await page.goto('/');
   await expect(page.getByTestId('demo-banner')).toBeVisible();
   await page.getByTestId(`demo-user-${role}`).click();
@@ -154,4 +154,42 @@ test('Incremento 1: admin registra usuario de Silogtran; ingreso con ese usuario
   await expect(page.getByTestId('nav-params')).toHaveCount(0);
   await expect(page.getByTestId('nav-users')).toHaveCount(0);
   await expect(page.getByTestId('import-button')).toBeDisabled();
+});
+
+test('Fase 3: facturación genera, simula, aprueba y aplica (simulado); banner y línea de tiempo', async ({ page }) => {
+  await loginAs(page, 'facturacion');
+  await expect(page.getByTestId('sim-banner')).toContainText('MODO SIMULADO');
+  await page.getByTestId('nav-recon').click();
+  await page.getByTestId('recon-from').fill('2026-01-01');
+  await page.getByTestId('recon-to').fill('2026-01-31');
+  await page.getByTestId('recon-button').click();
+  await expect(page.getByTestId('recon-status')).toContainText('Completada', { timeout: 30_000 });
+
+  await page.getByTestId('nav-adjust').click();
+  await page.getByTestId('adj-generate').click();
+  const row = page.locator('[data-testid=adj-row][data-transport="000124"]');
+  await expect(row).toContainText('Propuesta');
+  await row.click();
+  await expect(page.getByTestId('adj-detail')).toContainText('Nueva Tarifa');
+  await expect(page.getByTestId('adj-detail')).toContainText('no disponible en el informe');
+  await page.getByTestId('adj-simulate').click();
+  await expect(page.getByTestId('adj-preview')).toContainText('"nuevaTarifa": "250"');
+  await page.getByTestId('adj-approve').click();
+  await expect(row.getByTestId('adj-status')).toContainText('Aprobada');
+  await page.getByTestId('adj-apply').click();
+  await expect(page.getByTestId('adj-confirm')).toContainText('MODO SIMULADO');
+  await page.getByTestId('adj-confirm-ok').click();
+  await expect(row.getByTestId('adj-status')).toContainText('SIMULADA');
+  await expect(page.getByTestId('adj-simulated')).toBeVisible();
+  await expect(page.getByTestId('adj-timeline')).toContainText('SIMULADO');
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('adj-export').click()]);
+  expect(download.suggestedFilename()).toMatch(/\.xlsx$/);
+  await page.getByTestId('logout').click();
+
+  await loginAs(page, 'viewer');
+  await page.getByTestId('nav-adjust').click();
+  await expect(page.getByTestId('adj-generate')).toHaveCount(0);
+  await page.locator('[data-testid=adj-row][data-transport="000124"]').click();
+  await expect(page.getByTestId('adj-approve')).toHaveCount(0);
+  await expect(page.getByTestId('adj-apply')).toHaveCount(0);
 });

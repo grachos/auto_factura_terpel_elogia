@@ -4,6 +4,11 @@ import { isAppToken, verifyAppToken } from '../appAuth.js';
 import { can, permissionsOf } from '../permissions.js';
 import type { Permission } from '../permissions.js';
 import { silogLogin } from '../silogLogin.js';
+import { generateAdjustExport } from '../adjust/excel.js';
+import {
+  applyBatch, applyProposal, approveProposal, checkUncertain, discardSimulated, generateProposals, getAdjustSettings, getEvents, getProposal,
+  listProposals, rejectProposal, saveAdjustSettings, simulateProposal,
+} from '../adjust/service.js';
 import {
   createUser, deleteUserPassword, listServiceCredentials, listUsers, parsePurpose, saveServiceCredential, saveUserPassword, testServiceCredential,
   testUserCredential, updateUser,
@@ -155,6 +160,7 @@ async function dispatch(ctx: AppContext, req: HttpRequest, setRoute: (r: string)
       supabaseAnonKey: ctx.auth.mode === 'supabase' ? ctx.config.supabase.anonKey || null : null,
       demoUsers: ctx.auth.mode === 'demo' ? DEMO_USERS.map((u) => ({ email: u.email, role: u.role })) : [],
       silogSource: ctx.silog?.kind ?? 'none',
+      writerKind: ctx.writer.kind,
       silogLogin: !!ctx.silogAuth && ctx.config.security.appSessionSecret.length >= 32,
     };
     return ok(dto);
@@ -285,6 +291,9 @@ async function dispatch(ctx: AppContext, req: HttpRequest, setRoute: (r: string)
     return ok({ ok: true });
   }
 
+  const adj = await dispatchAdjust(ctx, session, parts, is, req);
+  if (adj) return adj;
+
   const adm = await dispatchAdmin(ctx, session, parts, is, req);
   if (adm) return adm;
 
@@ -292,6 +301,95 @@ async function dispatch(ctx: AppContext, req: HttpRequest, setRoute: (r: string)
   if (recon) return recon;
 
   throw new AppError(404, 'NOT_FOUND', 'Ruta no encontrada');
+}
+
+async function dispatchAdjust(
+  ctx: AppContext,
+  session: Session,
+  parts: string[],
+  is: (m: string, route: string) => boolean,
+  req: HttpRequest,
+): Promise<HttpResponse | null> {
+  const [a, b, c] = parts;
+  const deps = { db: ctx.db, storage: ctx.storage, silog: ctx.silog, writer: ctx.writer };
+  const uid = (seg: string | undefined): string => {
+    if (!isUuid(seg)) throw new AppError(400, 'INVALID_ID', 'Identificador inválido');
+    return seg;
+  };
+  if (a === 'reconciliations' && c === 'adjustments' && parts.length === 4 && parts[3] === 'generate' && is('POST', '/reconciliations/:id/adjustments/generate')) {
+    requirePermission(session, 'adjustments.generate');
+    return ok(await generateProposals(deps, uid(b), session.userId));
+  }
+  if (a !== 'adjustments') return null;
+  if (parts.length === 1 && is('GET', '/adjustments')) {
+    requirePermission(session, 'adjustments.view');
+    const runId = req.query.runId;
+    const status = typeof req.query.status === 'string' && req.query.status !== '' ? req.query.status : null;
+    let from: string | undefined;
+    let to: string | undefined;
+    if (runId) {
+      const run = await getReconRun(ctx.db, uid(runId));
+      from = run.dateFrom;
+      to = run.dateTo;
+    }
+    return ok({ proposals: await listProposals(ctx.db, { runFrom: from, runTo: to, status }), writerKind: ctx.writer.kind, simulated: ctx.writer.simulated });
+  }
+  if (b === 'settings' && parts.length === 2) {
+    if (is('GET', '/adjustments/settings')) {
+      requirePermission(session, 'adjustments.view');
+      return ok(await getAdjustSettings(ctx.db));
+    }
+    if (is('PUT', '/adjustments/settings')) {
+      requirePermission(session, 'adjustments.config');
+      const body = asObject(req.body);
+      return ok(await saveAdjustSettings(ctx.db, session.userId, { reasonTemplate: body.reasonTemplate, autoEnabled: body.autoEnabled }));
+    }
+  }
+  if (b === 'apply-batch' && parts.length === 2 && is('POST', '/adjustments/apply-batch')) {
+    requirePermission(session, 'adjustments.apply');
+    const ids = asObject(req.body).ids;
+    if (!Array.isArray(ids) || ids.length === 0 || ids.length > 50 || !ids.every((x) => typeof x === 'string' && isUuid(x))) {
+      throw new AppError(400, 'INVALID_FIELD', 'Campo inválido: ids (1 a 50 identificadores)');
+    }
+    return ok({ results: await applyBatch(deps, session.userId, ids as string[]) });
+  }
+  if (b === 'discard-simulated' && parts.length === 2 && is('POST', '/adjustments/discard-simulated')) {
+    requirePermission(session, 'adjustments.config');
+    return ok({ discarded: await discardSimulated(ctx.db, session.userId) });
+  }
+  if (b === 'export' && parts.length === 2 && is('POST', '/adjustments/export')) {
+    requirePermission(session, 'adjustments.view');
+    const r = await generateAdjustExport(deps, uid(asObject(req.body).runId as string | undefined), session.userId);
+    return ok({ url: await ctx.storage.signedUrl(r.path, SIGNED_URL_TTL_SECONDS), rows: r.rows, expiresInSeconds: SIGNED_URL_TTL_SECONDS });
+  }
+  if (parts.length === 2 && is('GET', '/adjustments/:id')) {
+    requirePermission(session, 'adjustments.view');
+    return ok({ proposal: await getProposal(ctx.db, uid(b)), events: await getEvents(ctx.db, uid(b)) });
+  }
+  if (parts.length === 3) {
+    const id = uid(b);
+    if (c === 'simulate' && is('POST', '/adjustments/:id/simulate')) {
+      requirePermission(session, 'adjustments.apply');
+      return ok(await simulateProposal(deps, session.userId, id));
+    }
+    if (c === 'approve' && is('POST', '/adjustments/:id/approve')) {
+      requirePermission(session, 'adjustments.approve');
+      return ok(await approveProposal(ctx.db, session.userId, id));
+    }
+    if (c === 'reject' && is('POST', '/adjustments/:id/reject')) {
+      requirePermission(session, 'adjustments.approve');
+      return ok(await rejectProposal(ctx.db, session.userId, id, asObject(req.body ?? {}).reason));
+    }
+    if (c === 'apply' && is('POST', '/adjustments/:id/apply')) {
+      requirePermission(session, 'adjustments.apply');
+      return ok((await applyProposal(deps, session.userId, id)).proposal);
+    }
+    if (c === 'check' && is('POST', '/adjustments/:id/check')) {
+      requirePermission(session, 'adjustments.apply');
+      return ok(await checkUncertain(deps, session.userId, id));
+    }
+  }
+  return null;
 }
 
 async function dispatchAdmin(

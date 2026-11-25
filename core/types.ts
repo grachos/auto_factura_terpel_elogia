@@ -105,6 +105,8 @@ export interface PublicConfigDto {
   silogSource: 'api' | 'mock' | 'none';
   /** El ingreso con usuario de Silogtran está disponible (base URL y APP_SESSION_SECRET configurados). */
   silogLogin: boolean;
+  /** Escritor de ajustes: mock = MODO SIMULADO (Silogtran no se modifica). */
+  writerKind: 'mock' | 'web';
 }
 
 export interface ApiErrorDto {
@@ -241,4 +243,78 @@ export interface ReconParamsDto {
 export interface ReconRunDetailDto {
   run: ReconRunDto;
   results: ReconResultDto[];
+}
+
+// ---- Fase 3: ajustes de tarifa ---------------------------------------------------------------------
+export type ProposalStatus =
+  | 'proposed' | 'needs_review' | 'approved' | 'applying' | 'applied' | 'simulated_applied' | 'failed' | 'uncertain'
+  | 'verification_failed' | 'rejected' | 'stale' | 'discarded';
+
+export interface ProposalLineDto {
+  field: 'pesoRemesa' | 'cantidadRemesa' | 'nuevaTarifa' | 'totalRemesa';
+  label: string;
+  current: string | null; // null = no disponible en el informe
+  proposed: string | null;
+  rule: string;
+}
+
+export interface ProposalDto {
+  id: string;
+  transportNumber: string;
+  expenseNumber: string | null;
+  serviceDate: string;
+  status: ProposalStatus;
+  reviewCode: string | null;
+  reviewDetail: string | null;
+  remesaCode: string | null;
+  manifest: string | null;
+  weightSource: 'terpel' | 'silogtran' | null;
+  gallons: string | null;
+  tariff: string | null;
+  currentWeight: string | null;
+  currentTotal: string | null;
+  targetValue: string | null;
+  reason: string | null;
+  lines: ProposalLineDto[];
+  simulated: boolean;
+  writerKind: string | null;
+  accountUser: string | null;
+  generatedBy: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  appliedBy: string | null;
+  appliedAt: string | null;
+  verification: Record<string, unknown> | null;
+  lastError: string | null;
+  autoEligible: boolean;
+  autoReasons: string[];
+  autoAllowed: boolean;
+  rulesVersion: string;
+  updatedAt: string;
+}
+
+export interface ProposalEventDto {
+  id: number;
+  at: string;
+  actor: string | null;
+  event: string;
+  fromStatus: string | null;
+  toStatus: string | null;
+  simulated: boolean;
+  detail: Record<string, unknown>;
+}
+
+export interface AdjustSettingsDto {
+  reasonTemplate: string;
+  autoEnabled: boolean;
+}
+
+export interface ApplyPreviewDto {
+  proposalId: string;
+  simulated: boolean;
+  writerKind: string;
+  accountUser: string | null;
+  accountConfigured: boolean;
+  blocked: string | null;
+  payload: { remesaCode: string; reason: string; pesoRemesa: string; cantidadRemesa: string; nuevaTarifa: string } | null;
 }

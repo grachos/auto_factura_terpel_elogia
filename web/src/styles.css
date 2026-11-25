@@ -61,3 +61,11 @@ tr.detail td { white-space: normal; background: var(--bg); }
 progress { width: 220px; }
 @media (max-width: 600px) { main { padding: .5rem; } }
 main[hidden] { display: none; }
+.sim-banner { background: var(--warn); color: #fff; text-align: center; padding: .4rem 1rem; font-weight: 700; letter-spacing: .02em; }
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: grid; place-items: center; padding: 1rem; z-index: 10; }
+.modal .card { max-width: 640px; width: 100%; }
+ol.timeline { margin: 0; padding-left: 1.1rem; display: grid; gap: .35rem; font-size: .88rem; }
+.badge.adj-proposed, .badge.adj-approved { color: var(--info); border-color: var(--info); }
+.badge.adj-applied { color: var(--ok); border-color: var(--ok); }
+.badge.adj-simulated_applied, .badge.adj-needs_review, .badge.adj-uncertain, .badge.adj-stale { color: var(--warn); border-color: var(--warn); }
+.badge.adj-failed, .badge.adj-verification_failed, .badge.adj-rejected { color: var(--err); border-color: var(--err); }

@@ -42,7 +42,7 @@ export function buildFixtures(): FixtureSet {
   add('plant9P', msg({
     receivedDateTime: '2026-01-06T14:00:00Z',
     bodyContent: htmlTableBody(baseFields({
-      transport: '000124', plant: '9P - Planta Ficticia Cliente', netValue: '2.500.000,00 COP', plate: 'XYZ-987',
+      transport: '000124', plant: '9P - Planta Ficticia Cliente', netValue: '2.493.250,00 COP', plate: 'XYZ-987',
       driverCode: 'D-0002', driverName: 'Conductor Ficticio Dos',
     })),
   }));
@@ -57,7 +57,7 @@ export function buildFixtures(): FixtureSet {
     receivedDateTime: '2026-01-08T14:00:00Z',
     subject: `RV: ${SUBJECT}`,
     bodyContent: forwardedBody(htmlTableBody(baseFields({
-      transport: '000124', plant: '9P - Planta Ficticia Cliente', netValue: '2.500.000,00 COP', plate: 'XYZ-987',
+      transport: '000124', plant: '9P - Planta Ficticia Cliente', netValue: '2.493.250,00 COP', plate: 'XYZ-987',
       driverCode: 'D-0002', driverName: 'Conductor Ficticio Dos',
     }))),
   }));

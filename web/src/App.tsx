@@ -4,6 +4,7 @@ import type { MailConfigDto, MeDto, PublicConfigDto, RunDetailDto, RunDto } from
 import { api, ApiError } from './api';
 import { hasSession, initAuth, login, loginSilog, logout } from './auth';
 import { Users } from './Users';
+import { Adjustments } from './Adjustments';
 import { Reconciliation } from './Reconciliation';
 import { Params } from './Params';
 
@@ -142,7 +143,7 @@ function Dashboard({ cfg, me, onLogout }: { cfg: PublicConfigDto; me: MeDto; onL
   const [driving, setDriving] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: 'info' | 'warn' | 'error'; text: string; resumeId?: string } | null>(null);
   const [tab, setTab] = useState<'results' | 'issues'>('results');
-  const [section, setSection] = useState<'import' | 'recon' | 'params' | 'users'>('import');
+  const [section, setSection] = useState<'import' | 'recon' | 'adjust' | 'params' | 'users'>('import');
   const cancel = useRef(false);
 
   const refreshRuns = useCallback(async () => setRuns((await api.listRuns()).runs), []);
@@ -245,13 +246,16 @@ function Dashboard({ cfg, me, onLogout }: { cfg: PublicConfigDto; me: MeDto; onL
           <button onClick={onLogout} data-testid="logout">Salir</button>
         </div>
       </header>
+      {cfg.writerKind === 'mock' && <div className="sim-banner" role="status" data-testid="sim-banner">MODO SIMULADO: Silogtran no se modifica</div>}
       <nav className="main-nav" aria-label="Secciones">
         <button aria-current={section === 'import' ? 'page' : undefined} onClick={() => setSection('import')} data-testid="nav-import">Importar autorizaciones</button>
         <button aria-current={section === 'recon' ? 'page' : undefined} onClick={() => setSection('recon')} data-testid="nav-recon">Conciliación</button>
+        {has('adjustments.view') && <button aria-current={section === 'adjust' ? 'page' : undefined} onClick={() => setSection('adjust')} data-testid="nav-adjust">Ajustes</button>}
         {has('params.view') && <button aria-current={section === 'params' ? 'page' : undefined} onClick={() => setSection('params')} data-testid="nav-params">Parámetros</button>}
         {has('users.manage') && <button aria-current={section === 'users' ? 'page' : undefined} onClick={() => setSection('users')} data-testid="nav-users">Usuarios</button>}
       </nav>
       {section === 'recon' && <main><Reconciliation cfg={cfg} me={me} /></main>}
+      {section === 'adjust' && has('adjustments.view') && <main><Adjustments cfg={cfg} me={me} /></main>}
       {section === 'params' && has('params.view') && <main><Params readOnly={!has('params.edit')} /></main>}
       {section === 'users' && has('users.manage') && <main><Users me={me} /></main>}
       <main hidden={section !== 'import'}>

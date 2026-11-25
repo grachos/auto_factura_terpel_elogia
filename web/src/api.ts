@@ -1,4 +1,5 @@
 import type {
+  AdjustSettingsDto, ApplyPreviewDto, ProposalDto, ProposalEventDto,
   ApiErrorDto, MailConfigDto, MatchFilterDto, MeDto, PlaceAliasDto, PublicConfigDto, ReconParamsDto, ReconResultDto, ReconRunDetailDto,
   ReconRunDto, ReconSettingsDto, ReconStepDto, RunDetailDto, RunDto, StepResultDto,
 } from '../../core/types';
@@ -74,6 +75,20 @@ export const api = {
   serviceCredentials: () => request<{ credentials: ServiceCredentialDto[] }>('GET', '/api/service-credentials'),
   saveServiceCredential: (purpose: string, silogUser: string, password: string) => request<{ credentials: ServiceCredentialDto[] }>('PUT', `/api/service-credentials/${purpose}`, { silogUser, password }),
   testServiceCredential: (purpose: string) => request<{ ok: boolean; testedAt: string }>('POST', `/api/service-credentials/${purpose}/test`),
+  // Fase 3
+  generateProposals: (runId: string) => request<{ created: number; refreshed: number; unchanged: number; needsReview: number; staled: number; total: number }>('POST', `/api/reconciliations/${runId}/adjustments/generate`),
+  listProposals: (runId: string, status?: string) => request<{ proposals: ProposalDto[]; writerKind: string; simulated: boolean }>('GET', `/api/adjustments?runId=${runId}${status ? `&status=${status}` : ''}`),
+  proposalDetail: (id: string) => request<{ proposal: ProposalDto; events: ProposalEventDto[] }>('GET', `/api/adjustments/${id}`),
+  simulateProposal: (id: string) => request<ApplyPreviewDto>('POST', `/api/adjustments/${id}/simulate`),
+  approveProposal: (id: string) => request<ProposalDto>('POST', `/api/adjustments/${id}/approve`),
+  rejectProposal: (id: string) => request<ProposalDto>('POST', `/api/adjustments/${id}/reject`, {}),
+  applyProposal: (id: string) => request<ProposalDto>('POST', `/api/adjustments/${id}/apply`),
+  checkProposal: (id: string) => request<ProposalDto>('POST', `/api/adjustments/${id}/check`),
+  applyBatch: (ids: string[]) => request<{ results: { id: string; ok: boolean; status?: string; code?: string; message?: string }[] }>('POST', '/api/adjustments/apply-batch', { ids }),
+  adjustSettings: () => request<AdjustSettingsDto>('GET', '/api/adjustments/settings'),
+  saveAdjustSettings: (s: Partial<AdjustSettingsDto>) => request<AdjustSettingsDto>('PUT', '/api/adjustments/settings', s),
+  discardSimulated: () => request<{ discarded: number }>('POST', '/api/adjustments/discard-simulated'),
+  exportAdjustments: (runId: string) => request<{ url: string; rows: number }>('POST', '/api/adjustments/export', { runId }),
   // Fase 2
   listRecon: () => request<{ runs: ReconRunDto[] }>('GET', '/api/reconciliations'),
   createRecon: (dateFrom: string, dateTo: string, sync = true) => request<ReconRunDto>('POST', '/api/reconciliations', { dateFrom, dateTo, sync }),

@@ -13,6 +13,8 @@ import { MockSilogtranSource, SilogtranApiSource } from './recon/silogtran.js';
 import type { SilogtranSource } from './recon/silogtran.js';
 import { MockSilogAuth, SilogApiAuth } from './silogAuth.js';
 import type { SilogAuthClient } from './silogAuth.js';
+import { MockSilogtranWriter, SilogtranWebWriter } from './adjust/writer.js';
+import type { SilogtranWriter } from './adjust/writer.js';
 import type { MailSource } from './mail/types.js';
 import { FsStorage } from './storage/fs.js';
 import { DbStorage } from './storage/db.js';
@@ -29,6 +31,8 @@ export interface AppContext {
   silog: SilogtranSource | null;
   /** Validador del login por API de Silogtran (ingreso de personas y prueba de conexión). */
   silogAuth: SilogAuthClient | null;
+  /** Escritor de ajustes. mock = MODO SIMULADO (Silogtran no se modifica). */
+  writer: SilogtranWriter;
 }
 
 export async function ensureMailConfig(db: Db, config: AppConfig): Promise<void> {
@@ -154,5 +158,6 @@ export async function createContext(env: Record<string, string | undefined> = pr
   let silogAuth: SilogAuthClient | null = null;
   if (sg.baseUrl) silogAuth = new SilogApiAuth(sg.baseUrl);
   else if (config.authMode === 'demo') silogAuth = new MockSilogAuth({}, 'demo'); // demo: cualquier usuario registrado entra con la clave "demo"
-  return { config, db, mail, storage, auth, silog, silogAuth };
+  const writer: SilogtranWriter = config.silog.writer === 'web' ? new SilogtranWebWriter() : new MockSilogtranWriter();
+  return { config, db, mail, storage, auth, silog, silogAuth, writer };
 }

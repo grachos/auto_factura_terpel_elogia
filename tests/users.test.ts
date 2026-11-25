@@ -57,6 +57,11 @@ describe('matriz de permisos', () => {
     'users.manage': ['admin'],
     'credentials.manage': ['admin'],
     'mail.config': ['admin'],
+    'adjustments.view': ['admin', 'facturacion', 'operator', 'viewer'],
+    'adjustments.generate': ['admin', 'facturacion'],
+    'adjustments.approve': ['admin', 'facturacion'],
+    'adjustments.apply': ['admin', 'facturacion'],
+    'adjustments.config': ['admin'],
   };
   it('coincide con la decisión del negocio', () => {
     for (const p of Object.keys(expected) as Permission[]) {
@@ -65,7 +70,7 @@ describe('matriz de permisos', () => {
     }
     expect(permissionsOf('facturacion')).not.toContain('users.manage');
     expect(permissionsOf('facturacion')).not.toContain('params.edit');
-    expect(permissionsOf('viewer')).toEqual(['results.view']);
+    expect(permissionsOf('viewer')).toEqual(['results.view', 'adjustments.view']);
   });
 });
 
@@ -131,7 +136,7 @@ describe('usuarios, ingreso con Silogtran y credenciales (API)', () => {
     expect(mm.me?.role).toBe('facturacion');
     expect(mm.me?.permissions).toContain('params.view');
     expect(mm.me?.permissions).not.toContain('params.edit');
-    expect((await me(tok.view as string)).me?.permissions).toEqual(['results.view']);
+    expect((await me(tok.view as string)).me?.permissions).toEqual(['results.view', 'adjustments.view']);
     // facturación importa/concilia pero no edita parámetros
     expect((await call('GET', '/api/mail-config', tok.fact)).status).toBe(403);
     expect((await call('PUT', '/api/match-filters', tok.fact, { filters: [] })).status).toBe(403);

@@ -11,7 +11,12 @@ export type Permission =
   | 'params.edit'
   | 'users.manage'
   | 'credentials.manage'
-  | 'mail.config';
+  | 'mail.config'
+  | 'adjustments.view'
+  | 'adjustments.generate'
+  | 'adjustments.approve'
+  | 'adjustments.apply'
+  | 'adjustments.config';
 
 const RUNNERS: AppRole[] = ['admin', 'facturacion', 'operator'];
 
@@ -25,6 +30,11 @@ export const PERMISSION_ROLES: Record<Permission, AppRole[]> = {
   'users.manage': ['admin'],
   'credentials.manage': ['admin'],
   'mail.config': ['admin'],
+  'adjustments.view': ALL_ROLES,
+  'adjustments.generate': ['admin', 'facturacion'],
+  'adjustments.approve': ['admin', 'facturacion'],
+  'adjustments.apply': ['admin', 'facturacion'],
+  'adjustments.config': ['admin'],
 };
 
 export function can(role: AppRole, permission: Permission): boolean {
