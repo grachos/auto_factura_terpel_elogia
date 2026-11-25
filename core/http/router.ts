@@ -11,6 +11,12 @@ import { SignedUrlStorage } from '../storage/fs.js';
 import { SIGNED_URL_TTL_SECONDS } from '../storage/types.js';
 import type { ApiErrorDto, MailConfigDto, MeDto, PublicConfigDto, Role } from '../types.js';
 import { sqlState } from '../db/types.js';
+import { generateReconExport } from '../recon/excel.js';
+import {
+  addAliasAndReconcile, createReconRun, deleteAlias, getParams, getReconDetail, getReconRun, isUuid, listReconRuns, listResults, loadAliases,
+  resolveResult, saveFilters, saveSettings, stepReconRun, syncStep, upsertAlias,
+} from '../recon/service.js';
+import type { MatchFilterDto, ReconSettingsDto } from '../types.js';
 
 export interface HttpRequest {
   method: string;
@@ -126,6 +132,7 @@ async function dispatch(ctx: AppContext, req: HttpRequest, setRoute: (r: string)
       supabaseUrl: ctx.auth.mode === 'supabase' ? ctx.config.supabase.url || null : null,
       supabaseAnonKey: ctx.auth.mode === 'supabase' ? ctx.config.supabase.anonKey || null : null,
       demoUsers: ctx.auth.mode === 'demo' ? DEMO_USERS.map((u) => ({ email: u.email, role: u.role })) : [],
+      silogSource: ctx.silog?.kind ?? 'none',
     };
     return ok(dto);
   }
@@ -151,7 +158,7 @@ async function dispatch(ctx: AppContext, req: HttpRequest, setRoute: (r: string)
       file: {
         data,
         contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        filename: `autorizaciones-${p.split('/')[0]?.slice(0, 8) ?? 'lote'}.xlsx`,
+        filename: p.startsWith('recon/') ? `conciliacion-${p.split('/')[1]?.slice(0, 8) ?? 'lote'}.xlsx` : `autorizaciones-${p.split('/')[0]?.slice(0, 8) ?? 'lote'}.xlsx`,
       },
     };
   }
@@ -229,5 +236,110 @@ async function dispatch(ctx: AppContext, req: HttpRequest, setRoute: (r: string)
     }
   }
 
+  const recon = await dispatchRecon(ctx, session, parts, method, is, req);
+  if (recon) return recon;
+
   throw new AppError(404, 'NOT_FOUND', 'Ruta no encontrada');
+}
+
+async function dispatchRecon(
+  ctx: AppContext,
+  session: Session,
+  parts: string[],
+  method: string,
+  is: (m: string, route: string) => boolean,
+  req: HttpRequest,
+): Promise<HttpResponse | null> {
+  const [a, b, c, d] = parts;
+  const deps = { db: ctx.db, storage: ctx.storage, silog: ctx.silog, defaultNit: ctx.config.silog.terpelNit };
+  const id = (seg: string | undefined): string => {
+    if (!isUuid(seg)) throw new AppError(400, 'INVALID_ID', 'Identificador inválido');
+    return seg;
+  };
+
+  if (a === 'silogtran' && b === 'sync' && parts.length === 2 && is('POST', '/silogtran/sync')) {
+    requireRole(session, WRITE_ROLES);
+    const body = asObject(req.body);
+    return ok(await syncStep(deps, body.dateFrom, body.dateTo, body.cursor, session.userId));
+  }
+
+  if (a === 'reconciliations') {
+    if (parts.length === 1) {
+      if (is('GET', '/reconciliations')) return ok({ runs: await listReconRuns(ctx.db) });
+      if (is('POST', '/reconciliations')) {
+        requireRole(session, WRITE_ROLES);
+        const body = asObject(req.body);
+        const run = await createReconRun(deps, { actor: session.userId, dateFrom: body.dateFrom, dateTo: body.dateTo, sync: body.sync === false ? false : true });
+        return ok(run, 201);
+      }
+    }
+    if (parts.length === 2 && is('GET', '/reconciliations/:id')) return ok(await getReconDetail(ctx.db, id(b)));
+    if (parts.length === 3 && c === 'step' && is('POST', '/reconciliations/:id/step')) {
+      requireRole(session, WRITE_ROLES);
+      return ok(await stepReconRun(deps, id(b), session.userId, async (dp, rid, actor) => void (await generateReconExport(dp, rid, actor))));
+    }
+    if (parts.length === 3 && c === 'results' && is('GET', '/reconciliations/:id/results')) {
+      const st = typeof req.query.status === 'string' && req.query.status !== '' ? req.query.status : null;
+      return ok({ results: await listResults(ctx.db, id(b), st) });
+    }
+    if (parts.length === 3 && c === 'export' && is('POST', '/reconciliations/:id/export')) {
+      requireRole(session, WRITE_ROLES);
+      return ok(await generateReconExport(ctx, id(b), session.userId));
+    }
+    if (parts.length === 4 && c === 'export' && d === 'url' && is('GET', '/reconciliations/:id/export/url')) {
+      const run = await getReconRun(ctx.db, id(b));
+      const row = await ctx.db.query<{ export_path: string | null }>('select export_path from reconciliation_runs where id=$1', [run.id]);
+      const path = row.rows[0]?.export_path;
+      if (!path || run.exportStatus !== 'ready') throw new AppError(404, 'EXPORT_NOT_READY', 'Aún no hay un Excel generado para esta conciliación');
+      const url = await ctx.storage.signedUrl(path, SIGNED_URL_TTL_SECONDS);
+      await audit(ctx.db, session.userId, 'recon_export.download_link', 'reconciliation_run', run.id, {});
+      return ok({ url, expiresInSeconds: SIGNED_URL_TTL_SECONDS });
+    }
+  }
+
+  if (a === 'reconciliation-results' && parts.length === 3) {
+    if (c === 'resolve' && is('POST', '/reconciliation-results/:id/resolve')) {
+      requireRole(session, WRITE_ROLES);
+      return ok(await resolveResult(ctx.db, session.userId, id(b), asObject(req.body).recordId));
+    }
+    if (c === 'alias' && is('POST', '/reconciliation-results/:id/alias')) {
+      requireRole(session, ['admin']);
+      const body = asObject(req.body);
+      return ok(await addAliasAndReconcile(ctx.db, session.userId, id(b), body.silogName, body.terpelName));
+    }
+  }
+
+  if (a === 'recon-params' && parts.length === 1 && is('GET', '/recon-params')) return ok(await getParams(ctx.db, ctx.config.silog.terpelNit));
+
+  if (a === 'match-filters' && parts.length === 1 && is('PUT', '/match-filters')) {
+    requireRole(session, ['admin']);
+    const body = asObject(req.body);
+    if (!Array.isArray(body.filters)) throw new AppError(400, 'INVALID_FIELD', 'Campo inválido: filters');
+    return ok({ filters: await saveFilters(ctx.db, session.userId, body.filters as MatchFilterDto[]) });
+  }
+  if (a === 'recon-settings' && parts.length === 1 && is('PUT', '/recon-settings')) {
+    requireRole(session, ['admin']);
+    const body = asObject(req.body);
+    return ok(await saveSettings(ctx.db, session.userId, body as unknown as ReconSettingsDto));
+  }
+  if (a === 'place-aliases') {
+    if (parts.length === 1 && is('GET', '/place-aliases')) return ok({ aliases: await loadAliases(ctx.db) });
+    if (parts.length === 1 && is('POST', '/place-aliases')) {
+      requireRole(session, ['admin']);
+      const body = asObject(req.body);
+      return ok(await upsertAlias(ctx.db, session.userId, body.silogName, body.terpelName), 201);
+    }
+    if (parts.length === 2 && is('PUT', '/place-aliases/:id')) {
+      requireRole(session, ['admin']);
+      const body = asObject(req.body);
+      return ok(await upsertAlias(ctx.db, session.userId, body.silogName, body.terpelName, id(b)));
+    }
+    if (parts.length === 2 && is('DELETE', '/place-aliases/:id')) {
+      requireRole(session, ['admin']);
+      await deleteAlias(ctx.db, session.userId, id(b));
+      return ok({ ok: true });
+    }
+  }
+  void method;
+  return null;
 }

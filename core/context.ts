@@ -9,6 +9,8 @@ import type { Db } from './db/types.js';
 import { createPgDb } from './db/pg.js';
 import { GraphMailSource, createMsalTokenProvider } from './mail/graph.js';
 import { MockMailSource } from './mail/mock.js';
+import { MockSilogtranSource, SilogtranApiSource } from './recon/silogtran.js';
+import type { SilogtranSource } from './recon/silogtran.js';
 import type { MailSource } from './mail/types.js';
 import { FsStorage } from './storage/fs.js';
 import { DbStorage } from './storage/db.js';
@@ -21,6 +23,8 @@ export interface AppContext {
   mail: MailSource;
   storage: StorageAdapter;
   auth: AuthVerifier;
+  /** Silogtran (solo lectura). null = sin configurar (la API responde SILOG_NOT_CONFIGURED). */
+  silog: SilogtranSource | null;
 }
 
 export async function ensureMailConfig(db: Db, config: AppConfig): Promise<void> {
@@ -135,5 +139,13 @@ export async function createContext(env: Record<string, string | undefined> = pr
     auth = createSupabaseVerifier({ url: config.supabase.url, jwtSecret: config.supabase.jwtSecret, anonKey: config.supabase.anonKey });
   }
   const mail = await stage('mail', () => buildMail(config));
-  return { config, db, mail, storage, auth };
+  let silog: SilogtranSource | null = null;
+  const sg = config.silog;
+  if (sg.baseUrl && sg.user && sg.password) {
+    silog = new SilogtranApiSource({ baseUrl: sg.baseUrl, user: sg.user, password: sg.password });
+  } else if (sg.mock) {
+    const { buildDemoSilogRows } = await import('../fixtures/silogtran.js');
+    silog = new MockSilogtranSource(buildDemoSilogRows());
+  }
+  return { config, db, mail, storage, auth, silog };
 }

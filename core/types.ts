@@ -97,8 +97,138 @@ export interface PublicConfigDto {
   supabaseUrl: string | null;
   supabaseAnonKey: string | null;
   demoUsers: { email: string; role: Role }[];
+  silogSource: 'api' | 'mock' | 'none';
 }
 
 export interface ApiErrorDto {
   error: { code: string; message: string; details?: Record<string, unknown> };
+}
+
+// ---- Fase 2: conciliación con Silogtran ----------------------------------------------------
+export type ReconStatus = 'EXACT' | 'MATCH_WITH_DIFFERENCES' | 'AMBIGUOUS' | 'NO_MATCH' | 'INSUFFICIENT_DATA';
+export type ReconRunStatus = 'pending' | 'syncing' | 'reconciling' | 'completed' | 'failed';
+export type FilterKeyDto = 'driver' | 'plate' | 'route' | 'date';
+export type FilterModeDto = 'exclusive' | 'preferred';
+
+export interface ReconRunDto {
+  id: string;
+  dateFrom: string;
+  dateTo: string;
+  syncEnabled: boolean;
+  lookbackDays: number;
+  windowDays: number;
+  rulesVersion: string;
+  status: ReconRunStatus;
+  syncCursor: string | null;
+  syncEnd: string | null;
+  reconcileOffset: number;
+  totalServices: number;
+  exact: number;
+  withDifferences: number;
+  ambiguous: number;
+  noMatch: number;
+  insufficient: number;
+  exportStatus: ExportStatus;
+  errorCode: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
+export interface ReconStepDto {
+  run: ReconRunDto;
+  done: boolean;
+  retryAfterMs: number | null;
+  /** Mensaje claro (sin datos sensibles) cuando el paso falló. */
+  message: string | null;
+}
+
+export interface TraceStepDto {
+  filter: FilterKeyDto;
+  before: number;
+  after: number;
+  mode: FilterModeDto;
+  skipped: boolean;
+  reason?: string;
+}
+
+export interface DifferenceDto {
+  field: string;
+  terpel: string | number | null;
+  silogtran: string | number | null;
+  severity: 'adjustable' | 'info';
+  note?: string;
+}
+
+export interface SilogRecordDto {
+  id: string;
+  manifest: string;
+  remesaCode: string;
+  dispatchDate: string | null;
+  deliveryDate: string | null;
+  plate: string | null;
+  driverName: string | null;
+  driverDocument: string | null;
+  origin: string | null;
+  destination: string | null;
+  remesaWeight: string | null;
+  netLoadWeight: string | null;
+  rate: string | null;
+  totalRemesa: string | null;
+  status: string | null;
+  remesaStatus: string | null;
+  invoice: string | null;
+}
+
+export interface ReconResultDto {
+  id: string;
+  transportNumber: string;
+  serviceDate: string;
+  status: ReconStatus;
+  reason: string | null;
+  rulesVersion: string;
+  terpel: {
+    route: string | null;
+    plate: string | null;
+    driverCode: string | null;
+    driverName: string | null;
+    volume: string | null;
+    netValue: string | null;
+  };
+  silog: SilogRecordDto | null;
+  candidates: SilogRecordDto[];
+  trace: TraceStepDto[];
+  differences: DifferenceDto[];
+  manual: boolean;
+  resolvedBy: string | null;
+  resolvedAt: string | null;
+}
+
+export interface MatchFilterDto {
+  key: FilterKeyDto;
+  position: number;
+  active: boolean;
+  mode: FilterModeDto;
+}
+
+export interface PlaceAliasDto {
+  id: string;
+  silogName: string;
+  terpelName: string;
+}
+
+export interface ReconSettingsDto {
+  windowDays: number;
+  lookbackDays: number;
+  terpelNit: string;
+}
+
+export interface ReconParamsDto {
+  filters: MatchFilterDto[];
+  aliases: PlaceAliasDto[];
+  settings: ReconSettingsDto;
+}
+
+export interface ReconRunDetailDto {
+  run: ReconRunDto;
+  results: ReconResultDto[];
 }

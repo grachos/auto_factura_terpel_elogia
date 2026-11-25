@@ -24,6 +24,7 @@ export interface AppConfig {
     certPrivateKeyPath: string;
   };
   supabase: { url: string; anonKey: string; serviceRoleKey: string; jwtSecret: string };
+  silog: { baseUrl: string; user: string; password: string; terpelNit: string; mock: boolean };
   demoJwtSecret: string;
   filesSigningSecret: string;
 }
@@ -68,6 +69,13 @@ export function loadConfig(env: Env = process.env): AppConfig {
       anonKey: str(env.SUPABASE_ANON_KEY),
       serviceRoleKey: str(env.SUPABASE_SERVICE_ROLE_KEY),
       jwtSecret: str(env.SUPABASE_JWT_SECRET),
+    },
+    silog: {
+      baseUrl: str(env.SILOG_BASE_URL),
+      user: str(env.SILOG_USER),
+      password: str(env.SILOG_PASSWORD),
+      terpelNit: str(env.SILOG_TERPEL_NIT, '830095213'),
+      mock: authMode === 'demo' && env.SILOG_SOURCE !== 'none',
     },
     demoJwtSecret: str(env.DEMO_JWT_SECRET),
     filesSigningSecret: str(env.FILES_SIGNING_SECRET),
