@@ -4,6 +4,10 @@ import { isAppToken, verifyAppToken } from '../appAuth.js';
 import { can, permissionsOf } from '../permissions.js';
 import type { Permission } from '../permissions.js';
 import { silogLogin } from '../silogLogin.js';
+import { runDiagnostic } from '../silog/web/diagnostic.js';
+import { SilogWebError } from '../silog/web/errors.js';
+import { openWebSession } from '../silog/web/session.js';
+import type { WebPurpose } from '../silog/web/session.js';
 import { generateAdjustExport } from '../adjust/excel.js';
 import {
   applyBatch, applyProposal, approveProposal, checkUncertain, discardSimulated, generateProposals, getAdjustSettings, getEvents, getProposal,
@@ -316,6 +320,31 @@ async function dispatchAdjust(
     if (!isUuid(seg)) throw new AppError(400, 'INVALID_ID', 'Identificador inválido');
     return seg;
   };
+  if (a === 'admin' && b === 'silog-web' && c === 'diagnostic' && parts.length === 3 && is('POST', '/admin/silog-web/diagnostic')) {
+    requirePermission(session, 'credentials.manage');
+    const body = asObject(req.body ?? {});
+    const purpose: WebPurpose = body.purpose === 'invoice' ? 'invoice' : 'adjust';
+    const remesa = body.remesa === undefined ? '0101228393' : String(body.remesa);
+    if (!/^\d{1,12}$/.test(remesa)) throw new AppError(400, 'INVALID_FIELD', 'Campo inválido: remesa');
+    const lookup = body.lookup === true;
+    const base = ctx.config.silog.webBaseUrl || (ctx.config.silog.baseUrl ? new URL(ctx.config.silog.baseUrl).origin : '');
+    try {
+      const s = await openWebSession({ db: ctx.db, encryptionKey: ctx.config.security.encryptionKey, baseUrl: base, waf: ctx.waf, fetchFn: ctx.webFetch }, purpose, session.userId);
+      try {
+        const out = await runDiagnostic(s.client, { lookup, remesa, reused: s.reused });
+        await audit(ctx.db, session.userId, 'silog_web.diagnostic', 'silog_web_session', purpose, { lookup, ok: true });
+        return ok({ ok: true, wafSolved: s.client.wafSolved, ...out });
+      } finally {
+        await s.close();
+      }
+    } catch (e) {
+      if (e instanceof SilogWebError) {
+        await audit(ctx.db, session.userId, 'silog_web.diagnostic', 'silog_web_session', purpose, { lookup, ok: false, code: e.code });
+        throw new AppError(e.status, e.code, e.message);
+      }
+      throw e;
+    }
+  }
   if (a === 'reconciliations' && c === 'adjustments' && parts.length === 4 && parts[3] === 'generate' && is('POST', '/reconciliations/:id/adjustments/generate')) {
     requirePermission(session, 'adjustments.generate');
     return ok(await generateProposals(deps, uid(b), session.userId));

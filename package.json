@@ -25,13 +25,16 @@
   "dependencies": {
     "@azure/msal-node": "^2.16.2",
     "@fastify/static": "^8.0.4",
+    "@sparticuz/chromium": "^153.0.0",
     "@supabase/supabase-js": "^2.47.10",
+    "cheerio": "^1.2.0",
     "exceljs": "^4.4.0",
     "fastify": "^5.2.0",
     "jose": "^5.9.6",
     "luxon": "^3.5.0",
     "node-html-parser": "^7.0.1",
     "pg": "^8.13.1",
+    "puppeteer-core": "^25.19.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

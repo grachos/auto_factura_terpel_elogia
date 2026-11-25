@@ -15,6 +15,8 @@ import { MockSilogAuth, SilogApiAuth } from './silogAuth.js';
 import type { SilogAuthClient } from './silogAuth.js';
 import { MockSilogtranWriter, SilogtranWebWriter } from './adjust/writer.js';
 import type { SilogtranWriter } from './adjust/writer.js';
+import { HttpWafSolver } from './silog/web/waf.js';
+import type { WafSolver } from './silog/web/waf.js';
 import type { MailSource } from './mail/types.js';
 import { FsStorage } from './storage/fs.js';
 import { DbStorage } from './storage/db.js';
@@ -33,6 +35,10 @@ export interface AppContext {
   silogAuth: SilogAuthClient | null;
   /** Escritor de ajustes. mock = MODO SIMULADO (Silogtran no se modifica). */
   writer: SilogtranWriter;
+  /** Resolvedor del reto AWS WAF para el login web de Silogtran (HTTP a api/silog-waf, o Chromium local). */
+  waf: WafSolver | null;
+  /** Solo pruebas: fetch alterno para el cliente web de Silogtran. */
+  webFetch?: typeof fetch;
 }
 
 export async function ensureMailConfig(db: Db, config: AppConfig): Promise<void> {
@@ -159,5 +165,15 @@ export async function createContext(env: Record<string, string | undefined> = pr
   if (sg.baseUrl) silogAuth = new SilogApiAuth(sg.baseUrl);
   else if (config.authMode === 'demo') silogAuth = new MockSilogAuth({}, 'demo'); // demo: cualquier usuario registrado entra con la clave "demo"
   const writer: SilogtranWriter = config.silog.writer === 'web' ? new SilogtranWebWriter() : new MockSilogtranWriter();
-  return { config, db, mail, storage, auth, silog, silogAuth, writer };
+  let waf: WafSolver | null = null;
+  if (sg.wafChromePath && !env.VERCEL) {
+    // Import dinámico con ruta variable: la función principal no arrastra puppeteer-core ni Chromium.
+    const mod = './silog/web/waf-browser.js';
+    waf = new ((await import(mod)) as { LocalWafSolver: new () => WafSolver }).LocalWafSolver();
+  } else if (config.security.appSessionSecret.length >= 32) {
+    const host = env.VERCEL_PROJECT_PRODUCTION_URL || env.VERCEL_URL;
+    const endpoint = sg.wafSolverUrl || (host ? `https://${host}/api/silog-waf` : '');
+    if (endpoint) waf = new HttpWafSolver(endpoint, config.security.appSessionSecret);
+  }
+  return { config, db, mail, storage, auth, silog, silogAuth, writer, waf };
 }

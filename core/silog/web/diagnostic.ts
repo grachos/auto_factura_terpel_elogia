@@ -1,0 +1,180 @@
+// Diagnóstico de SOLO LECTURA de la pantalla «Procedimiento de Cambio Tarifa».
+// Nunca envía un submit que persista: la etapa 1 es un GET; la etapa 2 solo usa callbacks de lectura
+// (autocompletado y TEventTriggeredCallback del control Remesa) y descarta cualquier destino que parezca Grabar.
+import * as cheerio from 'cheerio';
+import { SilogWebError } from './errors.js';
+import type { SilogWebClient } from './client.js';
+import { PradoPage } from './prado.js';
+
+export const TARIFF_PAGE = 'index.php?page=Despacho.Remesa_003.CambioTarifa_105';
+
+export interface ControlInfo {
+  tag: string; type: string | null; name: string | null; id: string | null; disabled: boolean; readOnly: boolean; checked: boolean | null;
+  maxLength: number | null; options: number | null;
+}
+export interface WidgetInfo { cls: string; id: string | null; eventTarget: string | null; eventName: string | null; validationGroup: string | null; controlToValidate: string | null; errorMessage: string | null }
+export interface TableInfo { id: string | null; headers: string[]; bodyRows: number; inputs: { name: string | null; id: string | null; type: string | null; disabled: boolean; readOnly: boolean }[] }
+export interface PageStructure {
+  title: string; formAction: string | null; formMethod: string | null;
+  controls: ControlInfo[]; widgets: WidgetInfo[]; autoCompletes: string[]; tables: TableInfo[];
+  labels: string[]; messages: string[]; validators: WidgetInfo[]; looksLikeLogin: boolean;
+}
+
+const redact = (s: string): string => s.replace(/\s+/g, ' ').trim().replace(/\b\d{7,}\b/g, '#').replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '<correo>').slice(0, 160);
+const pick = (body: string, key: string): string | null => new RegExp(`'${key}'\\s*:\\s*'([^']*)'`).exec(body)?.[1] ?? null;
+
+export function describePage(html: string): PageStructure {
+  const $ = cheerio.load(html);
+  const form = $('form').first();
+  const controls: ControlInfo[] = [];
+  form.find('input, select, textarea, button').each((_, el) => {
+    const $el = $(el);
+    const tag = (el as { tagName: string }).tagName;
+    const type = $el.attr('type')?.toLowerCase() ?? null;
+    if (tag === 'input' && type === 'hidden' && /^PRADO_/.test($el.attr('name') ?? '')) return; // estado interno de PRADO
+    controls.push({
+      tag, type, name: $el.attr('name') ?? null, id: $el.attr('id') ?? null, disabled: $el.is('[disabled]'), readOnly: $el.is('[readonly]'),
+      checked: type === 'checkbox' || type === 'radio' ? $el.is('[checked]') : null,
+      maxLength: $el.attr('maxlength') ? Number($el.attr('maxlength')) : null, options: tag === 'select' ? $el.find('option').length : null,
+    });
+  });
+  const widgets: WidgetInfo[] = [];
+  for (const m of html.matchAll(/Prado\.WebUI\.(\w+)\(\{([^;]*?)\}\);/g)) {
+    const body = m[2] as string;
+    widgets.push({
+      cls: m[1] as string, id: pick(body, 'ID') ?? pick(body, 'ControlID'), eventTarget: pick(body, 'EventTarget'), eventName: pick(body, 'EventName') ?? pick(body, 'Event'),
+      validationGroup: pick(body, 'ValidationGroup'), controlToValidate: pick(body, 'ControlToValidate'), errorMessage: pick(body, 'ErrorMessage'),
+    });
+  }
+  for (const m of html.matchAll(/new\s+Prado\.WebUI\.(\w+)\(\{([^;]*?)\}\)/g)) {
+    const body = m[2] as string;
+    const id = pick(body, 'ID');
+    if (!widgets.some((w) => w.cls === m[1] && w.id === id)) {
+      widgets.push({ cls: m[1] as string, id, eventTarget: pick(body, 'EventTarget'), eventName: pick(body, 'EventName'), validationGroup: pick(body, 'ValidationGroup'), controlToValidate: pick(body, 'ControlToValidate'), errorMessage: pick(body, 'ErrorMessage') });
+    }
+  }
+  const tables: TableInfo[] = $('table').toArray().map((t) => {
+    const $t = $(t);
+    let headers = $t.find('th').toArray().map((h) => redact($(h).text()));
+    if (headers.length === 0) headers = $t.find('tr').first().find('td').toArray().map((h) => redact($(h).text()));
+    return {
+      id: $t.attr('id') ?? null, headers: headers.filter(Boolean), bodyRows: Math.max($t.find('tr').length - 1, 0),
+      inputs: $t.find('input, select, textarea').toArray().map((i) => ({ name: $(i).attr('name') ?? null, id: $(i).attr('id') ?? null, type: $(i).attr('type') ?? null, disabled: $(i).is('[disabled]'), readOnly: $(i).is('[readonly]') })),
+    };
+  }).filter((t) => t.headers.length > 0 || t.inputs.length > 0);
+  const labels = [...new Set($('label, span[id*="Label"], legend').toArray().map((l) => redact($(l).text())).filter((t) => t.length > 1))].slice(0, 60);
+  const messages = [...new Set($('[id*="ensaje"], [id*="Error"], [class*="error"]').toArray().map((l) => redact($(l).text())).filter(Boolean))].slice(0, 20);
+  return {
+    title: redact($('title').first().text()), formAction: form.attr('action') ?? null, formMethod: form.attr('method') ?? null, controls,
+    widgets: widgets.filter((w) => !w.controlToValidate), autoCompletes: widgets.filter((w) => /AutoComplete/i.test(w.cls)).map((w) => w.id ?? '?'),
+    tables, labels, messages, validators: widgets.filter((w) => w.controlToValidate), looksLikeLogin: html.includes('ctl0$MainModule$BtnIngresar'),
+  };
+}
+
+export interface Step { step: string; ok: boolean; detail?: unknown }
+export interface DiagnosticResult {
+  page: string; reused: boolean; steps: Step[]; structure: PageStructure | null;
+  lookup: { requested: boolean; steps: Step[]; tables: TableInfo[]; numericFields: { name: string; value: string | null; disabled: boolean; readOnly: boolean }[] } | null;
+}
+
+const UNSAFE = /grabar|guardar|save|submit|btn|button|generar|aceptar|eliminar|anular/i;
+export const isSafeTarget = (t: string | null): t is string => !!t && !UNSAFE.test(t);
+
+function htmlFragments(text: string): string[] {
+  const out: string[] = [];
+  const m = /<!--X-PRADO-ACTIONS-->([\s\S]*?)<!--\/\/X-PRADO-ACTIONS-->/.exec(text);
+  const walk = (v: unknown): void => {
+    if (typeof v === 'string') { if (v.includes('<')) out.push(v); }
+    else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === 'object') Object.values(v).forEach(walk);
+  };
+  if (m) { try { walk(JSON.parse(m[1] as string)); } catch { /* sin acciones */ } }
+  if (/<table/i.test(text)) out.push(text);
+  return out;
+}
+
+/** Valores numéricos de peso/cantidad/tarifa (no son datos personales) y estructura de tablas en fragmentos HTML. */
+export function summarizeFragments(frags: string[]): { tables: TableInfo[]; numeric: { name: string; value: string | null; disabled: boolean; readOnly: boolean }[] } {
+  const tables: TableInfo[] = [];
+  const numeric: { name: string; value: string | null; disabled: boolean; readOnly: boolean }[] = [];
+  for (const f of frags) {
+    const st = describePage(`<form>${f}</form>`);
+    tables.push(...st.tables);
+    const $ = cheerio.load(`<form>${f}</form>`);
+    $('input, select, textarea').each((_, el) => {
+      const $el = $(el);
+      const name = $el.attr('name') ?? $el.attr('id') ?? '';
+      if (!/peso|cantidad|tarifa|valor|total/i.test(name)) return;
+      const raw = ($el.attr('value') ?? $el.text() ?? '').trim();
+      numeric.push({ name, value: /^-?[\d.,]+$/.test(raw) ? raw : raw === '' ? '' : null, disabled: $el.is('[disabled]'), readOnly: $el.is('[readonly]') });
+    });
+  }
+  return { tables, numeric };
+}
+
+/**
+ * Etapa 1: GET de la pantalla y su estructura. Etapa 2 (opcional): casilla/campo Remesa con pasos de lectura.
+ * Cada paso se reporta. No hay ningún POST a botones y nunca se pulsa Grabar.
+ */
+export async function runDiagnostic(client: SilogWebClient, opts: { lookup: boolean; remesa: string; reused: boolean }): Promise<DiagnosticResult> {
+  const steps: Step[] = [];
+  const page = await client.enqueue(() => client.request(TARIFF_PAGE));
+  const structure = describePage(page.text);
+  if (structure.looksLikeLogin) throw new SilogWebError('WEB_BAD_PAGE', 'Silogtran devolvió la pantalla de login en lugar de la pantalla de cambio de tarifa (sesión no válida o sin permiso)');
+  steps.push({ step: 'GET pantalla de cambio de tarifa', ok: true, detail: { controls: structure.controls.length, widgets: structure.widgets.length, tables: structure.tables.length } });
+  const result: DiagnosticResult = { page: TARIFF_PAGE, reused: opts.reused, steps, structure, lookup: null };
+  if (!opts.lookup) return result;
+
+  const lookupSteps: Step[] = [];
+  const tables: TableInfo[] = [];
+  const numericFields: { name: string; value: string | null; disabled: boolean; readOnly: boolean }[] = [];
+  result.lookup = { requested: true, steps: lookupSteps, tables, numericFields };
+  await client.enqueue(async () => {
+    const prado = new PradoPage(client, page);
+    const isRemesa = (s: string | null | undefined): boolean => !!s && /remesa/i.test(s) && !/razon|raz[oó]n|grabar|btn/i.test(s);
+    const ac = structure.widgets.find((w) => /AutoComplete/i.test(w.cls) && isRemesa(w.id));
+    const chk = structure.controls.find((c) => c.type === 'checkbox' && isRemesa(c.id ?? c.name));
+    const input = structure.controls.find((c) => c.type !== 'checkbox' && c.type !== 'hidden' && c.tag === 'input' && isRemesa(c.id ?? c.name));
+    lookupSteps.push({ step: 'identificar controles Remesa', ok: !!(ac || input), detail: { autoComplete: ac?.id ?? null, checkbox: chk?.id ?? null, input: input?.id ?? null } });
+    if (!ac && !input) return;
+
+    const triggersFor = (id: string): { target: string; event: string | null }[] =>
+      structure.widgets.filter((w) => w.cls === 'TEventTriggeredCallback' && w.id === id && isSafeTarget(w.eventTarget)).map((w) => ({ target: w.eventTarget as string, event: w.eventName }));
+    const runTriggers = async (id: string, label: string): Promise<void> => {
+      for (const t of triggersFor(id)) {
+        try {
+          const r = await prado.callback(t.target);
+          const sum = summarizeFragments(htmlFragments(r.text));
+          tables.push(...sum.tables);
+          numericFields.push(...sum.numeric);
+          lookupSteps.push({ step: `callback de lectura (${label})`, ok: true, detail: { event: t.event, target: t.target, fieldsUpdated: r.applied.length, tablesFound: sum.tables.length } });
+        } catch (e) {
+          lookupSteps.push({ step: `callback de lectura (${label})`, ok: false, detail: { target: t.target, error: e instanceof SilogWebError ? e.code : 'ERROR' } });
+          if (!(e instanceof SilogWebError) || e.code !== 'WEB_HTTP_ERROR') throw e;
+        }
+      }
+    };
+
+    if (chk?.name) {
+      prado.fields[chk.name] = 'on'; // marcar la casilla localmente (como el navegador) y disparar sus callbacks de lectura
+      lookupSteps.push({ step: 'marcar casilla Remesa (local)', ok: true });
+      if (chk.id) await runTriggers(chk.id, 'casilla Remesa');
+    }
+    const field = ac?.id ? (prado.ids.get(ac.id.toLowerCase()) ?? input?.name ?? null) : (input?.name ?? null);
+    if (!field) { lookupSteps.push({ step: 'resolver nombre del campo Remesa', ok: false }); return; }
+    if (ac) {
+      const sugg = await prado.suggest(field, opts.remesa);
+      lookupSteps.push({ step: 'autocompletar remesa (callback de lectura)', ok: true, detail: { suggestions: sugg.length, cellsPerRow: sugg[0]?.cells.length ?? 0, attrKeys: Object.keys(sugg[0]?.attrs ?? {}) } });
+      if (sugg[0]) { prado.select(sugg[0]); lookupSteps.push({ step: 'seleccionar primera sugerencia (local)', ok: true }); }
+    } else {
+      prado.fields[field] = opts.remesa;
+      lookupSteps.push({ step: 'escribir código de remesa (local)', ok: true });
+    }
+    const id = ac?.id ?? input?.id ?? null;
+    if (id) await runTriggers(id, 'campo Remesa');
+    // Estructura final de lo que la página tiene ahora (sin enviar nada).
+    const sumPage = summarizeFragments([prado.html]);
+    numericFields.push(...sumPage.numeric.filter((n) => !numericFields.some((x) => x.name === n.name)));
+  });
+  return result;
+}
