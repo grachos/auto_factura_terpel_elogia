@@ -185,6 +185,8 @@ export interface ReconResultDto {
   serviceDate: string;
   status: ReconStatus;
   reason: string | null;
+  reasonCode: string | null;
+  weightSource: 'terpel' | 'silogtran' | null;
   rulesVersion: string;
   terpel: {
     route: string | null;
@@ -220,6 +222,7 @@ export interface ReconSettingsDto {
   windowDays: number;
   lookbackDays: number;
   terpelNit: string;
+  zeroVolumeMode: 'ignore' | 'reconcile_if_value_matches' | 'reconcile_always';
 }
 
 export interface ReconParamsDto {

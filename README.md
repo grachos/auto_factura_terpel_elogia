@@ -165,6 +165,12 @@ La app compara cada servicio de Terpel (autorización vigente) con el informe de
 - **Cascada de filtros** (tabla `match_filters`, editable por admin): conductor (cédula sin ceros) → placa → ruta (con `place_aliases`) → fecha (`0 ≤ descargue − despacho ≤ N` días, N=10). Modo *excluyente* (0 candidatos ⇒ `NO_MATCH`) o *preferente* (si dejaría 0 se ignora y se anota). Por defecto: conductor, ruta y fecha excluyentes; placa preferente. Cada resultado guarda la traza `[{filter, before, after, mode, skipped}]`.
 - **Estados**: `EXACT`, `MATCH_WITH_DIFFERENCES` (solo diferencias `adjustable`: volumen Terpel vs `remesa_peso` —no se compara si Terpel trae 0— y valor neto vs `total_remesa`), `AMBIGUOUS` (nunca se elige al azar), `NO_MATCH` (normal si aún no se despachó), `INSUFFICIENT_DATA`. La placa distinta es solo informativa.
 - **Bandeja de revisión** (UI «Conciliación»): ver traza y diferencias, elegir candidato (operador/admin, auditado con usuario y fecha) y «Agregar equivalencia» de lugar (admin) que re-concilia el servicio. Excel (hojas *Conciliación*, *Incidencias*, *Resumen*) por el mismo `StorageAdapter`.
+- **Solo registros CUMPLIDO**: del informe de Silogtran solo se consideran las filas con `estado = CUMPLIDO` (se excluyen ANULADO y ACTIVO). El snapshot solo guarda CUMPLIDO; si una fila ya guardada cambia de estado, solo se actualiza su estado (no se borra nada) y deja de ser candidata. Al conciliar se ignora cualquier fila guardada con otro estado.
+- **Volumen 0 de Terpel (parámetro `zero_volume_mode`, solo admin, auditado; pestaña Parámetros)**. Regla de negocio: si Terpel manda volumen 0, por defecto no se tiene en cuenta (el cliente corrige y reenvía).
+  - `ignore` (por defecto): el servicio no se concilia: `INSUFFICIENT_DATA` con motivo `ZERO_VOLUME_IGNORED` ("Volumen 0: se espera corrección de Terpel"); sin ajuste.
+  - `reconcile_if_value_matches`: cascada normal; con un único candidato, si el valor neto de Terpel es exactamente `total_remesa` → `EXACT` (el volumen no se compara; `weightSource = silogtran`); si no coincide → `INSUFFICIENT_DATA` con `ZERO_VOLUME_VALUE_MISMATCH` (no se concilia ni se ajusta).
+  - `reconcile_always`: cascada normal; el volumen no se compara; el valor sí (diferencia ajustable si difiere); `weightSource = silogtran`.
+  - Con volumen > 0 el comportamiento no cambia (`weightSource = terpel`). El motivo y el origen del peso se ven en la tabla de Conciliación, en el Excel y en la API.
 - **Parámetros** (solo admin): equivalencias de lugares (CRUD), orden/activación/modo de filtros, ventana de días, lookback y NIT; todo con `audit_log`.
 - Migración `supabase/migrations/0005_phase2_reconciliation.sql`; equivalente para el Supabase compartido en `supabase/deploy/terpel_0005_phase2_reconciliation.sql` (esquema `terpel`, dueño `terpel_app`).
 
@@ -215,7 +221,7 @@ Ver [`.env.example`](.env.example) (sin valores reales). Las principales: `AUTH_
 | **Volumen** | Unidad confirmada: galones. Frecuentemente viene en 0 (valor válido); en la Fase 2 no debe compararse en 0. |
 | **Planta de cargue** | No se evalúa (decisión del negocio). |
 | **Informe Silogtran** | Fase 2 implementada y probada contra la API real desde el backend local. En producción (Vercel) la conciliación requiere que `SILOG_BASE_URL`, `SILOG_USER` y `SILOG_PASSWORD` estén definidas; si faltan la app responde `SILOG_NOT_CONFIGURED`. |
-| **Ajustes en Silogtran (Fase 3)** | No implementados (Silogtran solo lectura). |
+| **Ajustes en Silogtran (Fase 3)** | No implementados (Silogtran solo lectura). Diseño del procedimiento de cambio en `docs/diseno-arquitectura.md` (Fase 3). |
 | **Ventana de días por ruta** | Ventana global (10 días, configurable); en los casos reales fue de 2 a 6. |
 | **Producción** | Desplegado en Vercel sobre el esquema `terpel` de un proyecto Supabase compartido; los Excel se guardan en PostgreSQL (`STORAGE_DRIVER=db`). El plan gratuito de Vercel no permite uso comercial: pasar a Pro antes del uso diario. |
 

@@ -70,6 +70,8 @@ export const RECON_COLUMNS: Col[] = [
   { header: 'Diferencias', type: 'text', width: 60, value: (r) => diffText(r.differences) || null },
   { header: 'Traza de filtros', type: 'text', width: 60, value: (r) => traceText(r.trace) || null },
   { header: 'Motivo', type: 'text', width: 40, value: (r) => r.reason },
+  { header: 'Código de motivo', type: 'text', width: 28, value: (r) => r.reasonCode },
+  { header: 'Origen del peso (Fase 3)', type: 'text', width: 16, value: (r) => (r.weightSource === 'terpel' ? 'Terpel' : r.weightSource === 'silogtran' ? 'Silogtran' : null) },
   { header: 'Elegido manualmente por', type: 'text', width: 24, value: (r) => (r.manual ? (r.resolvedBy ?? 'sí') : null) },
 ];
 

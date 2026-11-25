@@ -96,7 +96,7 @@ describe('motor de cascada', () => {
     expect(r.differences.some((d) => d.field === 'plate' && d.severity === 'info')).toBe(true);
   });
   it('volumen 0 no se compara', () => {
-    const r = reconcile(terpel({ transportVolume: '0' }), [cand({ remesaWeight: '777' })], params());
+    const r = reconcile(terpel({ transportVolume: '0' }), [cand({ remesaWeight: '777' })], params({ zeroVolumeMode: 'reconcile_always' }));
     expect(r.status).toBe('EXACT');
     expect(compareRecord(terpel({ transportVolume: 0 }), cand({ remesaWeight: 5 }))).toEqual([]);
   });
@@ -263,6 +263,7 @@ describe('conciliación (BD)', () => {
     storage = new MemoryStorage();
     source = new MockSilogtranSource(await seedSixCases(db));
     deps = { db, storage, silog: source };
+    await db.query(`update reconciliation_settings set zero_volume_mode = 'reconcile_always'`); // los 6 casos se calibraron con este modo
   });
   afterAll(async () => db.close());
 
@@ -444,7 +445,14 @@ describe('API de conciliación', () => {
     expect((await call('PUT', '/api/match-filters', tokens.admin, { filters: [{ key: 'driver', position: 1, active: true, mode: 'exclusive' }] })).status).toBe(400);
     expect((await call('PUT', '/api/recon-settings', tokens.admin, { windowDays: 'x', lookbackDays: 5, terpelNit: '830095213' })).status).toBe(400);
     const st = await call('PUT', '/api/recon-settings', tokens.admin, { windowDays: 6, lookbackDays: 20, terpelNit: '830.095.213' });
-    expect(json<{ windowDays: number; terpelNit: string }>(st)).toMatchObject({ windowDays: 6, terpelNit: '830095213' });
+    expect(json<{ windowDays: number; terpelNit: string; zeroVolumeMode: string }>(st)).toMatchObject({ windowDays: 6, terpelNit: '830095213', zeroVolumeMode: 'ignore' });
+    expect((await call('PUT', '/api/recon-settings', tokens.admin, { windowDays: 6, lookbackDays: 20, terpelNit: '830095213', zeroVolumeMode: 'otro' })).status).toBe(400);
+    expect((await call('PUT', '/api/recon-settings', tokens.op, { windowDays: 6, lookbackDays: 20, terpelNit: '830095213', zeroVolumeMode: 'reconcile_always' })).status).toBe(403);
+    const zm = await call('PUT', '/api/recon-settings', tokens.admin, { windowDays: 6, lookbackDays: 20, terpelNit: '830095213', zeroVolumeMode: 'reconcile_always' });
+    expect(json<{ zeroVolumeMode: string }>(zm).zeroVolumeMode).toBe('reconcile_always');
+    await call('PUT', '/api/recon-settings', tokens.admin, { windowDays: 6, lookbackDays: 20, terpelNit: '830095213', zeroVolumeMode: 'ignore' });
+    const zaud = await ctx.db.query<{ data: { zeroVolumeMode?: string } }>(`select data from audit_log where action='recon_settings.update'`);
+    expect(zaud.rows.some((a) => a.data.zeroVolumeMode === 'reconcile_always')).toBe(true);
     const created = json<{ id: string }>(await call('POST', '/api/place-aliases', tokens.admin, { silogName: 'Sitio Uno', terpelName: 'Sitio Dos' }));
     expect((await call('POST', '/api/place-aliases', tokens.admin, { silogName: 'sitio  uno', terpelName: 'Otro' })).status).toBe(201); // upsert por nombre normalizado
     expect((await call('DELETE', `/api/place-aliases/${created.id}`, tokens.admin)).status).toBe(200);
@@ -470,5 +478,87 @@ describe('API de conciliación', () => {
     const none = await createContext({ AUTH_MODE: 'demo', PGLITE_MEMORY: '1', DATA_DIR: mkdtempSync(join(tmpdir(), 'af3-')), DEMO_JWT_SECRET: 's', SILOG_SOURCE: 'none' });
     expect(none.silog).toBeNull();
     await none.db.close();
+  });
+});
+
+// ---- Solo CUMPLIDO y volumen 0 parametrizable ------------------------------------------------------------
+describe('volumen 0 de Terpel (3 modos x valor coincide / no coincide / volumen > 0)', () => {
+  const zero = (o: Partial<TerpelInput> = {}) => terpel({ transportVolume: '0', ...o });
+  const run = (t: TerpelInput, c: SilogCandidate, mode: 'ignore' | 'reconcile_if_value_matches' | 'reconcile_always') =>
+    reconcile(t, [c], params({ zeroVolumeMode: mode }));
+
+  it('ignore (defecto): volumen 0 => INSUFFICIENT_DATA ZERO_VOLUME_IGNORED, sin ajuste, aunque el valor coincida', () => {
+    for (const c of [cand(), cand({ totalRemesa: '1' })]) {
+      const r = run(zero(), c, 'ignore');
+      expect(r).toMatchObject({ status: 'INSUFFICIENT_DATA', reasonCode: 'ZERO_VOLUME_IGNORED', reason: 'Volumen 0: se espera corrección de Terpel', chosenId: null, weightSource: null, differences: [] });
+    }
+    expect(reconcile(zero(), [cand()], params()).reasonCode).toBe('ZERO_VOLUME_IGNORED'); // sin parámetro = ignore
+    const gt = run(terpel(), cand(), 'ignore');
+    expect(gt).toMatchObject({ status: 'EXACT', weightSource: 'terpel', reasonCode: null });
+  });
+
+  it('reconcile_if_value_matches', () => {
+    expect(run(zero(), cand(), 'reconcile_if_value_matches')).toMatchObject({ status: 'EXACT', weightSource: 'silogtran' });
+    const bad = run(zero(), cand({ totalRemesa: '4312101' }), 'reconcile_if_value_matches');
+    expect(bad).toMatchObject({ status: 'INSUFFICIENT_DATA', reasonCode: 'ZERO_VOLUME_VALUE_MISMATCH', chosenId: null, weightSource: null });
+    expect(bad.differences.every((d) => d.severity !== 'adjustable')).toBe(true);
+    expect(run(terpel(), cand({ totalRemesa: '4312101' }), 'reconcile_if_value_matches')).toMatchObject({ status: 'MATCH_WITH_DIFFERENCES', weightSource: 'terpel' });
+    expect(run(terpel(), cand(), 'reconcile_if_value_matches')).toMatchObject({ status: 'EXACT', weightSource: 'terpel' });
+  });
+
+  it('reconcile_always', () => {
+    expect(run(zero(), cand({ remesaWeight: '1' }), 'reconcile_always')).toMatchObject({ status: 'EXACT', weightSource: 'silogtran' });
+    const diff = run(zero(), cand({ totalRemesa: '4312101' }), 'reconcile_always');
+    expect(diff).toMatchObject({ status: 'MATCH_WITH_DIFFERENCES', weightSource: 'silogtran' });
+    expect(diff.differences.map((d) => d.field)).toEqual(['value']);
+    expect(run(terpel(), cand({ totalRemesa: '4312101', remesaWeight: '1' }), 'reconcile_always').differences.map((d) => d.field)).toEqual(['volume', 'value']);
+  });
+});
+
+describe('solo registros CUMPLIDO', () => {
+  it('sync: ACTIVO/ANULADO no entran al snapshot; un registro guardado que pasa a ANULADO deja de ser candidato (sin borrarse)', async () => {
+    const db = await newDb();
+    await seedService(db, { transport: 'T-X', date: '2026-11-20', driver: '0000000031', route: 'C1-AAA - BBB', plate: 'CCC001', volume: 100, value: 500 });
+    const row = { cliente_nit: TERPEL_NIT, ciudad_origen_remesa: 'AAA', ciudad_destino_remesa: 'BBB', conductor_documento: '31', placa: 'CCC001', remesa_peso: 100, total_remesa: '500', fecha: '2026-11-19' };
+    const rows = [
+      silogRow({ ...row, manifiesto: 'X1', remesa_codigo: 1, estado: 'ACTIVO' }),
+      silogRow({ ...row, manifiesto: 'X2', remesa_codigo: 2, estado: 'ANULADO' }),
+      silogRow({ ...row, manifiesto: 'X3', remesa_codigo: 3, estado: 'CUMPLIDO' }),
+    ];
+    const src = new MockSilogtranSource(rows);
+    const deps2: ReconDeps = { db, storage: new MemoryStorage(), silog: src };
+    await syncChunk(deps2, '2026-11-19', '2026-11-19', null);
+    expect((await db.query<{ manifest: string }>('select manifest from silogtran_records order by manifest')).rows.map((r) => r.manifest)).toEqual(['X3']);
+    const r1 = await createReconRun(deps2, { actor: 'u', dateFrom: '2026-11-20', dateTo: '2026-11-20', sync: false });
+    await runAll(deps2, r1.id);
+    expect((await listResults(db, r1.id))[0]).toMatchObject({ status: 'EXACT' });
+    // el mismo registro ahora ANULADO en Silogtran: se actualiza el estado, no se borra, y deja de ser candidato
+    rows[2] = { ...(rows[2] as Record<string, unknown>), estado: 'ANULADO' };
+    await syncChunk({ ...deps2, silog: new MockSilogtranSource(rows) }, '2026-11-19', '2026-11-19', null);
+    expect((await db.query<{ status: string }>(`select status from silogtran_records where manifest='X3'`)).rows[0]?.status).toBe('ANULADO');
+    // una fila guardada con otro estado se ignora al conciliar aunque exista en la tabla
+    await db.query(`insert into silogtran_records (manifest, remesa_code, dispatch_date, client_nit, status) values ('Z','9','2026-11-19','${TERPEL_NIT}','ACTIVO')`);
+    const r2 = await createReconRun(deps2, { actor: 'u', dateFrom: '2026-11-20', dateTo: '2026-11-20', sync: false });
+    await runAll(deps2, r2.id);
+    expect((await listResults(db, r2.id))[0]).toMatchObject({ status: 'NO_MATCH' });
+    await db.close();
+  });
+
+  it('servicio con volumen 0 en BD: modo por defecto ignore, y el modo se persiste con motivo y origen del peso', async () => {
+    const db = await newDb();
+    await seedService(db, { transport: 'T-Z', date: '2026-11-20', driver: '0000000041', route: 'C1-AAA - BBB', plate: 'DDD001', volume: 0, value: 500 });
+    const rows = [silogRow({ cliente_nit: TERPEL_NIT, manifiesto: 'Z1', remesa_codigo: 1, fecha: '2026-11-19', ciudad_origen_remesa: 'AAA', ciudad_destino_remesa: 'BBB', conductor_documento: '41', placa: 'DDD001', total_remesa: '500', remesa_peso: 77 })];
+    const d: ReconDeps = { db, storage: new MemoryStorage(), silog: new MockSilogtranSource(rows) };
+    const go = async (): Promise<ReconResultDto> => {
+      const r = await createReconRun(d, { actor: 'u', dateFrom: '2026-11-20', dateTo: '2026-11-20' });
+      await runAll(d, r.id);
+      return (await listResults(db, r.id))[0] as ReconResultDto;
+    };
+    expect(await go()).toMatchObject({ status: 'INSUFFICIENT_DATA', reasonCode: 'ZERO_VOLUME_IGNORED', weightSource: null });
+    await db.query(`update reconciliation_settings set zero_volume_mode='reconcile_if_value_matches'`);
+    expect(await go()).toMatchObject({ status: 'EXACT', reasonCode: null, weightSource: 'silogtran' });
+    await db.query(`update reconciliation_settings set zero_volume_mode='reconcile_always'`);
+    expect(await go()).toMatchObject({ status: 'EXACT', weightSource: 'silogtran' });
+    await db.close();
   });
 });

@@ -33,13 +33,13 @@ export function isUuid(v: string | undefined): v is string {
 
 // ---- Parámetros -------------------------------------------------------------------------------
 export async function loadSettings(q: Queryable, defaultNit = '830095213'): Promise<ReconSettingsDto> {
-  const r = await q.query<{ window_days: number; lookback_days: number; terpel_nit: string }>(
-    'select window_days, lookback_days, terpel_nit from reconciliation_settings limit 1',
+  const r = await q.query<{ window_days: number; lookback_days: number; terpel_nit: string; zero_volume_mode: ReconSettingsDto['zeroVolumeMode'] }>(
+    'select window_days, lookback_days, terpel_nit, zero_volume_mode from reconciliation_settings limit 1',
   );
   const row = r.rows[0];
   return row
-    ? { windowDays: row.window_days, lookbackDays: row.lookback_days, terpelNit: row.terpel_nit }
-    : { windowDays: 10, lookbackDays: 15, terpelNit: defaultNit };
+    ? { windowDays: row.window_days, lookbackDays: row.lookback_days, terpelNit: row.terpel_nit, zeroVolumeMode: row.zero_volume_mode }
+    : { windowDays: 10, lookbackDays: 15, terpelNit: defaultNit, zeroVolumeMode: 'ignore' };
 }
 
 export async function loadFilters(q: Queryable): Promise<MatchFilterDto[]> {
@@ -64,7 +64,7 @@ async function engineParams(q: Queryable): Promise<EngineParams> {
   const filters: FilterConfig[] = await loadFilters(q);
   const settings = await loadSettings(q);
   const al = await q.query<{ silog_norm: string; terpel_norm: string }>('select silog_norm, terpel_norm from place_aliases');
-  return { filters, windowDays: settings.windowDays, aliases: new Map(al.rows.map((a) => [a.silog_norm, a.terpel_norm])) };
+  return { filters, windowDays: settings.windowDays, zeroVolumeMode: settings.zeroVolumeMode, aliases: new Map(al.rows.map((a) => [a.silog_norm, a.terpel_norm])) };
 }
 
 export async function saveFilters(db: Db, actor: string, input: MatchFilterDto[]): Promise<MatchFilterDto[]> {
@@ -97,13 +97,16 @@ export async function saveSettings(db: Db, actor: string, s: ReconSettingsDto): 
   const lookbackDays = int(s.lookbackDays, 'lookbackDays', 90);
   const nit = typeof s.terpelNit === 'string' ? s.terpelNit.replace(/\D+/g, '') : '';
   if (nit.length < 5 || nit.length > 15) throw new AppError(400, 'INVALID_FIELD', 'Campo inválido: terpelNit');
+  const modes = ['ignore', 'reconcile_if_value_matches', 'reconcile_always'];
+  const mode = s.zeroVolumeMode === undefined ? (await loadSettings(db)).zeroVolumeMode : s.zeroVolumeMode;
+  if (!modes.includes(mode)) throw new AppError(400, 'INVALID_FIELD', 'Campo inválido: zeroVolumeMode');
   await db.transaction(async (tx) => {
     await tx.query(
-      `insert into reconciliation_settings (id, window_days, lookback_days, terpel_nit, updated_by) values (true,$1,$2,$3,$4)
-       on conflict (id) do update set window_days=$1, lookback_days=$2, terpel_nit=$3, updated_by=$4, updated_at=now()`,
-      [windowDays, lookbackDays, nit, actor],
+      `insert into reconciliation_settings (id, window_days, lookback_days, terpel_nit, zero_volume_mode, updated_by) values (true,$1,$2,$3,$5,$4)
+       on conflict (id) do update set window_days=$1, lookback_days=$2, terpel_nit=$3, zero_volume_mode=$5, updated_by=$4, updated_at=now()`,
+      [windowDays, lookbackDays, nit, actor, mode],
     );
-    await audit(tx, actor, 'recon_settings.update', 'reconciliation_settings', 'singleton', { windowDays, lookbackDays });
+    await audit(tx, actor, 'recon_settings.update', 'reconciliation_settings', 'singleton', { windowDays, lookbackDays, zeroVolumeMode: mode });
   });
   return loadSettings(db);
 }
@@ -191,7 +194,12 @@ export async function syncChunk(deps: ReconDeps, dateFrom: string, dateTo: strin
   }
   const { kept, total } = dedupeAndFilter(rows, settings.terpelNit);
   await deps.db.transaction(async (tx) => {
-    if (kept.length > 0) {
+    // Solo CUMPLIDO entra al snapshot; el resto solo actualiza el estado de filas ya guardadas (nunca se borra nada).
+    const cumplidos = kept.filter((k) => k.status === 'CUMPLIDO');
+    for (const o of kept.filter((k) => k.status !== 'CUMPLIDO')) {
+      await tx.query(`update silogtran_records set status=$3, remesa_status=$4, synced_at=now() where manifest=$1 and remesa_code=$2`, [o.manifest, o.remesa_code, o.status, o.remesa_status]);
+    }
+    if (cumplidos.length > 0) {
       await tx.query(
         `insert into silogtran_records (manifest, remesa_code, dispatch_date, delivery_date, plate, plate_normalized, trailer_plate,
            driver_name, driver_document, client, client_nit, origin_city, destination_city, remesa_weight, net_load_weight, rate,
@@ -212,7 +220,7 @@ export async function syncChunk(deps: ReconDeps, dateFrom: string, dateTo: strin
            net_load_weight=excluded.net_load_weight, rate=excluded.rate, freight_dispatch=excluded.freight_dispatch,
            total_remesa=excluded.total_remesa, additional_value=excluded.additional_value, status=excluded.status,
            remesa_status=excluded.remesa_status, invoice=excluded.invoice, synced_at=now()`,
-        [JSON.stringify(kept)],
+        [JSON.stringify(cumplidos)],
       );
     }
     await tx.query(
@@ -330,7 +338,7 @@ async function loadCandidates(q: Queryable, nit: string, from: string, to: strin
     `select id, to_char(dispatch_date,'YYYY-MM-DD') as dispatch_date, plate_normalized, driver_document, origin_city, destination_city,
             remesa_weight::text as remesa_weight, total_remesa::text as total_remesa
        from silogtran_records
-      where client_nit = $1 and upper(coalesce(status,'')) <> 'ANULADO' and dispatch_date between $2 and $3`,
+      where client_nit = $1 and upper(coalesce(status,'')) = 'CUMPLIDO' and dispatch_date between $2 and $3`,
     [nit.replace(/\D+/g, ''), from, to],
   );
   return r.rows.map((c) => ({
@@ -349,18 +357,18 @@ async function reconcileRows(tx: Queryable, runId: string, rows: ServiceRow[], p
     const res = reconcile(t, candidates, params, manualId);
     await tx.query(
       `insert into reconciliation_results (service_id, run_id, authorization_id, transport_number, service_date, status, chosen_record_id,
-         candidate_ids, filter_trace, differences, reason, rules_version, computed_at)
-       values ($1,$2,$3,$4,$5,$6,$7,$8::uuid[],$9::jsonb,$10::jsonb,$11,$12,now())
+         candidate_ids, filter_trace, differences, reason, rules_version, computed_at, reason_code, weight_source)
+       values ($1,$2,$3,$4,$5,$6,$7,$8::uuid[],$9::jsonb,$10::jsonb,$11,$12,now(),$13,$14)
        on conflict (service_id) do update set run_id=excluded.run_id, authorization_id=excluded.authorization_id,
          transport_number=excluded.transport_number, service_date=excluded.service_date, status=excluded.status,
          chosen_record_id=excluded.chosen_record_id, candidate_ids=excluded.candidate_ids, filter_trace=excluded.filter_trace,
-         differences=excluded.differences, reason=excluded.reason, rules_version=excluded.rules_version, computed_at=now(),
+         differences=excluded.differences, reason=excluded.reason, reason_code=excluded.reason_code, weight_source=excluded.weight_source, rules_version=excluded.rules_version, computed_at=now(),
          resolved_record_id = case when reconciliation_results.authorization_id = excluded.authorization_id then reconciliation_results.resolved_record_id else null end,
          resolved_by = case when reconciliation_results.authorization_id = excluded.authorization_id then reconciliation_results.resolved_by else null end,
          resolved_at = case when reconciliation_results.authorization_id = excluded.authorization_id then reconciliation_results.resolved_at else null end`,
       [
         s.service_id, runId, s.authorization_id, s.transport_number, s.service_date, res.status, res.chosenId,
-        `{${res.candidateIds.join(',')}}`, JSON.stringify(res.trace), JSON.stringify(res.differences), res.reason, RULES_VERSION,
+        `{${res.candidateIds.join(',')}}`, JSON.stringify(res.trace), JSON.stringify(res.differences), res.reason, RULES_VERSION, res.reasonCode, res.weightSource,
       ],
     );
   }
@@ -458,7 +466,7 @@ export async function stepReconRun(deps: ReconDeps, runId: string, actor: string
 
 // ---- Resultados ---------------------------------------------------------------------------------
 interface ResultRow {
-  id: string; transport_number: string; service_date: string; status: ReconStatus; reason: string | null; rules_version: string;
+  id: string; transport_number: string; service_date: string; status: ReconStatus; reason: string | null; reason_code: string | null; weight_source: 'terpel' | 'silogtran' | null; rules_version: string;
   chosen_record_id: string | null; candidate_ids: string[]; filter_trace: TraceStepDto[]; differences: DifferenceDto[];
   resolved_record_id: string | null; resolved_by: string | null; resolved_at: Date | null;
   route: string | null; plate: string | null; driver_code: string | null; driver_name: string | null; volume: string | null; net_value: string | null;
@@ -481,7 +489,7 @@ function recDto(r: RecRow): SilogRecordDto {
 }
 
 const RESULT_SELECT = `
-  select r.id, r.transport_number, to_char(r.service_date,'YYYY-MM-DD') as service_date, r.status, r.reason, r.rules_version,
+  select r.id, r.transport_number, to_char(r.service_date,'YYYY-MM-DD') as service_date, r.status, r.reason, r.reason_code, r.weight_source, r.rules_version,
          r.chosen_record_id, r.candidate_ids, r.filter_trace, r.differences, r.resolved_record_id, r.resolved_by, r.resolved_at,
          a.route, a.plate, a.driver_code, a.driver_name, a.transport_volume::text as volume, a.net_value::text as net_value
     from reconciliation_results r join authorizations a on a.id = r.authorization_id`;
@@ -504,7 +512,7 @@ async function toResultDtos(q: Queryable, rows: ResultRow[]): Promise<ReconResul
     for (const r of rr.rows) recs.set(r.id, recDto(r));
   }
   return rows.map((r) => ({
-    id: r.id, transportNumber: r.transport_number, serviceDate: r.service_date, status: r.status, reason: r.reason, rulesVersion: r.rules_version,
+    id: r.id, transportNumber: r.transport_number, serviceDate: r.service_date, status: r.status, reason: r.reason, reasonCode: r.reason_code, weightSource: r.weight_source, rulesVersion: r.rules_version,
     terpel: { route: r.route, plate: r.plate, driverCode: r.driver_code, driverName: r.driver_name, volume: r.volume, netValue: r.net_value },
     silog: r.chosen_record_id ? (recs.get(r.chosen_record_id) ?? null) : null,
     candidates: r.candidate_ids.map((c) => recs.get(c)).filter((x): x is SilogRecordDto => !!x),

@@ -268,13 +268,13 @@ export function Reconciliation({ cfg, me }: { cfg: PublicConfigDto; me: MeDto })
             <div className="table-wrap">
               <table data-testid="recon-table">
                 <thead>
-                  <tr><th>Transporte</th><th>Descargue</th><th>Terpel (ruta · placa · galones · valor)</th><th>Silogtran (manifiesto · despacho · placa · peso · total)</th><th>Estado</th><th>Diferencias</th></tr>
+                  <tr><th>Transporte</th><th>Descargue</th><th>Terpel (ruta · placa · galones · valor)</th><th>Silogtran (manifiesto · despacho · placa · peso · total)</th><th>Estado</th><th>Motivo</th><th>Peso Fase 3</th><th>Diferencias</th></tr>
                 </thead>
                 <tbody>
                   {visible.map((r) => (
                     <FragmentRow key={r.id} r={r} open={open === r.id} toggle={() => setOpen(open === r.id ? null : r.id)} canWrite={canWrite} isAdmin={isAdmin} onResolve={onResolve} onAlias={onAlias} />
                   ))}
-                  {visible.length === 0 && <tr><td colSpan={6} className="muted">Sin resultados para este filtro.</td></tr>}
+                  {visible.length === 0 && <tr><td colSpan={8} className="muted">Sin resultados para este filtro.</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -325,9 +325,11 @@ function FragmentRow({ r, open, toggle, canWrite, isAdmin, onResolve, onAlias }:
             : r.status === 'AMBIGUOUS' ? `${r.candidates.length} candidatos` : '—'}
         </td>
         <td><Badge value={r.status} />{r.manual && <span className="muted"> (manual)</span>}</td>
+        <td className="wrap" data-testid="recon-reason">{r.reasonCode ? `${r.reasonCode}: ` : ''}{r.status === 'INSUFFICIENT_DATA' || r.reasonCode ? r.reason : '—'}</td>
+        <td data-testid="recon-weight-source">{r.weightSource === 'terpel' ? 'Terpel' : r.weightSource === 'silogtran' ? 'Silogtran' : '—'}</td>
         <td className="wrap">{r.differences.filter((d) => d.severity === 'adjustable').map((d) => FIELD_LABEL[d.field] ?? d.field).join(', ') || '—'}</td>
       </tr>
-      {open && <tr className="detail"><td colSpan={6}><ResultDetail r={r} canWrite={canWrite} isAdmin={isAdmin} onResolve={onResolve} onAlias={onAlias} /></td></tr>}
+      {open && <tr className="detail"><td colSpan={8}><ResultDetail r={r} canWrite={canWrite} isAdmin={isAdmin} onResolve={onResolve} onAlias={onAlias} /></td></tr>}
     </>
   );
 }

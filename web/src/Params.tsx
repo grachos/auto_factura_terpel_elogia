@@ -71,8 +71,20 @@ export function Params() {
             <label>Ventana despacho→descargue (días)<input type="number" min={0} max={60} value={settings.windowDays} onChange={(e) => setSettings({ ...settings, windowDays: Number(e.target.value) })} data-testid="set-window" /></label>
             <label>Consultar Silogtran desde (días antes)<input type="number" min={0} max={90} value={settings.lookbackDays} onChange={(e) => setSettings({ ...settings, lookbackDays: Number(e.target.value) })} data-testid="set-lookback" /></label>
             <label>NIT de Terpel<input value={settings.terpelNit} onChange={(e) => setSettings({ ...settings, terpelNit: e.target.value })} data-testid="set-nit" /></label>
+            <label>Volumen 0 de Terpel
+              <select value={settings.zeroVolumeMode} onChange={(e) => setSettings({ ...settings, zeroVolumeMode: e.target.value as ReconSettingsDto['zeroVolumeMode'] })} data-testid="set-zero-mode">
+                <option value="ignore">No tener en cuenta (por defecto)</option>
+                <option value="reconcile_if_value_matches">Conciliar solo si el valor coincide</option>
+                <option value="reconcile_always">Conciliar siempre</option>
+              </select>
+            </label>
             <button className="primary" data-testid="save-settings" onClick={() => run(() => api.saveSettings(settings), 'Parámetros guardados.')}>Guardar</button>
           </div>
+          <ul className="muted" data-testid="zero-mode-help">
+            <li><b>No tener en cuenta</b>: si Terpel manda volumen 0 el servicio no se concilia (Datos insuficientes, ZERO_VOLUME_IGNORED); se espera que Terpel corrija y reenvíe.</li>
+            <li><b>Conciliar solo si el valor coincide</b>: se busca el despacho normalmente; si el valor neto de Terpel es exactamente el total de la remesa queda Exacto (el volumen no se compara y el peso será el de Silogtran); si no coincide queda Datos insuficientes (ZERO_VOLUME_VALUE_MISMATCH) y no se ajusta.</li>
+            <li><b>Conciliar siempre</b>: cascada normal; el volumen no se compara, el valor sí (diferencia a ajustar si difiere) y el peso será el de Silogtran.</li>
+          </ul>
         </section>
       )}
 
