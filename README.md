@@ -196,6 +196,14 @@ Probar en demo: `npm run demo`, entrar como operador, importar enero de 2026 y a
 - **Escritor real (pendiente)**: la pantalla es `https://construproyec.colombiasoftware.net/index.php?page=Despacho.Remesa_003.CambioTarifa_105` (PRADO, «Procedimiento de Cambio Tarifa» por remesa). Decisión: el escritor vivirá **dentro de esta app**. Para enchufarlo bastará implementar `SilogtranWriter` (`core/adjust/writer.ts`: `changeTariff` y `getChangeState`) con `simulated=false` y `SILOG_WRITER=web`; ver «Qué cambiaría» en `docs/diseno-arquitectura.md`.
 - Migración `0008_adjustments.sql` (+ `supabase/deploy/terpel_0008_adjustments.sql`).
 
+## Login web de Silogtran y diagnóstico de solo lectura (incremento 3a)
+
+- **Cliente web** (`core/silog/web/`): login por formulario PRADO + centro de costo, cookie jar cifrada (AES-256-GCM, tabla `silog_web_sessions`, migración 0009), cola serializada, un solo login simultáneo por cuenta, errores claros (`WEB_LOGIN_PASSWORD_CHANGE_REQUIRED`, `WEB_LOGIN_2FA_NOT_SUPPORTED`, `WEB_LOGIN_REJECTED`, `WEB_WAF_FAILED`, ...). No registra cuerpos, cookies ni claves.
+- **Reto AWS WAF**: función separada `api/silog-waf.ts` (`@sparticuz/chromium` + `puppeteer-core`, 60 s) que SOLO devuelve las cookies `aws-waf*`; exige HMAC derivado de `APP_SESSION_SECRET`. La función principal no incluye Chromium. Las cookies del WAF se guardan cifradas y se reutilizan. Local: `WAF_CHROME_PATH`. Prueba manual: `WAF_CHROME_PATH=<chromium> NODE_USE_ENV_PROXY=1 npx tsx` con un script que llame a `LocalWafSolver` (el reto se resolvió en ~2,3 s en el sandbox).
+- **Diagnóstico** (`POST /api/admin/silog-web/diagnostic`, solo admin, auditado): entra con la cuenta `adjust` guardada y devuelve la ESTRUCTURA de la pantalla (controles, widgets, tablas, validadores). Banderas del cuerpo: `lookup` (autocompletado de la remesa) y `search` (envío del botón *Buscar*, de lectura). Nunca pulsa Grabar ni devuelve cookies, claves o valores personales. Resultado documentado en `docs/silogtran-cambio-tarifa.md`.
+- **Escritura real: NO implementada** (`SILOG_WRITER=mock`); es el incremento 3b.
+- Variables nuevas: `SILOG_WEB_BASE_URL`, `WAF_SOLVER_URL`, `WAF_CHROME_PATH` (todas opcionales; ver `.env.example`).
+
 ## Variables de entorno
 
 Ver [`.env.example`](.env.example) (sin valores reales). Las principales: `AUTH_MODE`, `MAIL_SOURCE`, `MAIL_MAILBOX`, `MAIL_ALLOWED_SENDER`, `MAIL_SUBJECT_PATTERN`, `MAIL_REQUIRE_DMARC_PASS`, `BUSINESS_KEY_STRATEGY`, `GRAPH_*`, `DATABASE_URL`, `STORAGE_DRIVER`, `SUPABASE_*`, `SILOG_*` (Fase 2), `ENCRYPTION_KEY` y `APP_SESSION_SECRET` (usuarios), `SILOG_WRITER` (`mock` por defecto). Las variables `MAIL_*` solo siembran la primera configuración; luego un administrador la edita desde la UI.
