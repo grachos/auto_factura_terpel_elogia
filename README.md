@@ -176,9 +176,17 @@ La app compara cada servicio de Terpel (autorización vigente) con el informe de
 
 Probar en demo: `npm run demo`, entrar como operador, importar enero de 2026 y abrir **Conciliación** (Silogtran simulado). Con credenciales reales: definir `SILOG_*` en `.env` (o en Vercel) y elegir un rango.
 
+## Usuarios, roles y credenciales (incremento 1)
+
+- **Ingreso**: pantalla con dos opciones, «Correo» (Supabase, como antes) y «Usuario de Silogtran». Con la segunda, la app comprueba primero que el usuario esté **registrado y activo** (`app_users`) y solo entonces valida la contraseña con el login por API de Silogtran (solo lectura; la contraseña no se guarda). Emite un token propio de 8 h (`APP_SESSION_SECRET`). Límite de intentos persistido en BD, mensajes uniformes, `Retry-After` en bloqueos, auditoría sin datos sensibles.
+- **Roles y permisos** (`core/permissions.ts`, devueltos en `/me`): `admin` (todo), `facturacion` (importar, conciliar, resolver; ve parámetros sin editarlos; sin usuarios), `operator` (importar/conciliar/resolver), `viewer` (solo lectura). Detalle en la sección 10 de `docs/diseno-arquitectura.md`.
+- **Pestaña «Usuarios»** (solo admin): alta/edición/desactivación de usuarios por su usuario de Silogtran, contraseña opcional guardada **cifrada** (AES-256-GCM, AAD = id del registro, formato `v1:`; solo escritura, nunca se devuelve; «Probar conexión»), y **cuenta de ajustes** (credencial de servicio `adjust`; el modelo admite también `invoice`). Protección del último administrador.
+- **Variables nuevas** (solo servidor): `ENCRYPTION_KEY` (64 hex: `openssl rand -hex 32`) y `APP_SESSION_SECRET` (`openssl rand -base64 48`). Si faltan, el guardado de credenciales y el ingreso con Silogtran responden un error claro (503) y el ingreso por correo sigue funcionando. En modo demo, cualquier usuario registrado entra con la contraseña `demo` (Silogtran simulado).
+- Migración `0007_users_credentials.sql` (+ `supabase/deploy/terpel_0007_users_credentials.sql`): tablas sin permisos para `anon`/`authenticated`.
+
 ## Variables de entorno
 
-Ver [`.env.example`](.env.example) (sin valores reales). Las principales: `AUTH_MODE`, `MAIL_SOURCE`, `MAIL_MAILBOX`, `MAIL_ALLOWED_SENDER`, `MAIL_SUBJECT_PATTERN`, `MAIL_REQUIRE_DMARC_PASS`, `BUSINESS_KEY_STRATEGY`, `GRAPH_*`, `DATABASE_URL`, `STORAGE_DRIVER`, `SUPABASE_*`, `SILOG_*` (Fase 2). Las variables `MAIL_*` solo siembran la primera configuración; luego un administrador la edita desde la UI.
+Ver [`.env.example`](.env.example) (sin valores reales). Las principales: `AUTH_MODE`, `MAIL_SOURCE`, `MAIL_MAILBOX`, `MAIL_ALLOWED_SENDER`, `MAIL_SUBJECT_PATTERN`, `MAIL_REQUIRE_DMARC_PASS`, `BUSINESS_KEY_STRATEGY`, `GRAPH_*`, `DATABASE_URL`, `STORAGE_DRIVER`, `SUPABASE_*`, `SILOG_*` (Fase 2), `ENCRYPTION_KEY` y `APP_SESSION_SECRET` (usuarios). Las variables `MAIL_*` solo siembran la primera configuración; luego un administrador la edita desde la UI.
 
 ## Reglas de negocio implementadas
 
@@ -209,6 +217,8 @@ Ver [`.env.example`](.env.example) (sin valores reales). Las principales: `AUTH_
 - `npm run demo:twice`.
 - Fase 2 (Vitest + PGlite con migraciones reales, datos sintéticos): normalizadores, motor de cascada (orden, activación, excluyente/preferente, ventana, AMBIGUOUS, NO_MATCH, INSUFFICIENT_DATA, volumen 0, diferencias, placa informativa), deduplicación/ANULADO/NIT, cliente de la API (token crudo, re-login, errores sin credenciales), sync idempotente, 6 casos reales reproducidos con datos inventados, endpoints con roles, auditoría, resolución manual, equivalencias y Excel que concuerda con la BD. Smoke e2e de Conciliación y Parámetros.
 - Fase 2 contra la API real de Silogtran (backend local con PGlite + los 6 servicios de Terpel ya importados, rango 17–25/11/2026): los 6 resultados coinciden con lo esperado (ver docs/diseno-arquitectura.md).
+
+- Usuarios y credenciales (Vitest, datos sintéticos): cifrado (ida y vuelta, AAD, clave inválida), matriz de permisos, ingreso con Silogtran simulado (mensaje uniforme, bloqueo antes de llamar a Silogtran, token manipulado/vencido, revocación al desactivar/cambiar rol, convivencia con tokens de Supabase), protección del último admin, ausencia de secretos en BD/API/logs/auditoría y e2e. Prueba real solo local: ingreso y «Probar conexión» contra la API real de Silogtran.
 
 ### Pendiente de verificar
 

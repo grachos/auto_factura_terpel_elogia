@@ -174,7 +174,23 @@ Datos de conductor: datos personales (Ley 1581 de 2012) → acceso por rol, sin 
 - Reenvíos internos: revisión con `SENDER_NOT_ALLOWED`.
 
 
-## 10. Usuarios, roles, cuentas de Silogtran y modo asistido / no asistido (diseño acordado; sin implementar)
+## 10. Usuarios, roles, cuentas de Silogtran y modo asistido / no asistido (diseño acordado; incremento 1 IMPLEMENTADO)
+
+**Estado.** Incremento 1 implementado: usuarios (`app_users`), roles (`admin`, `facturacion`, `operator`, `viewer`), matriz central de permisos (`core/permissions.ts`; la API devuelve `permissions` en `/me` y la UI muestra solo lo permitido), credenciales cifradas AES-256-GCM (`silog_credentials`: de persona opcional y de servicio por `purpose` = `adjust`|`invoice`; hoy solo se usa `adjust`), «Probar conexión» por login por API (lectura), e ingreso con usuario de Silogtran (`POST /api/auth/silog-login`) con límite de intentos persistido en BD (`login_attempts`: 5 fallos/usuario y 20/IP cada 15 min, evaluado antes de llamar a Silogtran). Los modos asistido/no asistido, la Fase 3 y la Fase 4 siguen sin implementar. El login WEB de Silogtran (reto AWS WAF) se verificará en la Fase 3.
+
+**Variables nuevas (solo servidor):** `ENCRYPTION_KEY` (64 hex; sin ella no se guardan credenciales: 503 `ENCRYPTION_NOT_CONFIGURED`) y `APP_SESSION_SECRET` (≥ 32 caracteres; sin él el ingreso con Silogtran responde 503 `SESSION_NOT_CONFIGURED`). El ingreso por correo (Supabase) no depende de ellas.
+
+**Matriz de permisos.**
+
+| Permiso | admin | facturacion | operator | viewer |
+|---|---|---|---|---|
+| Ver resultados | sí | sí | sí | sí |
+| Importar / conciliar / resolver revisión | sí | sí | sí | no |
+| Ver parámetros | sí | sí | no | no |
+| Editar parámetros, equivalencias, volumen 0, buzón | sí | no | no | no |
+| Usuarios y credenciales | sí | no | no | no |
+
+**Sesión.** Token propio HS256 (`typ:'app'`, 8 h, `APP_SESSION_SECRET`) que convive con el JWT de Supabase; en cada petición se consulta `app_users` (activo, rol vigente, `session_version`), así que desactivar, cambiar el rol o cerrar sesión surte efecto en la siguiente petición. Protección de administradores: nadie puede desactivarse ni quitarse el rol a sí mismo y siempre queda al menos un administrador activo.
 
 **Usuarios y credenciales (solo administrador).** Cada usuario de la app tiene su usuario de Silogtran, un rol (administrador / facturación) y, opcionalmente, su contraseña de Silogtran guardada CIFRADA (AES-256-GCM, clave solo en el servidor, AAD = id del registro; nunca se muestra ni se devuelve por la API; botón "Probar conexión"; auditoría). Las personas pueden ingresar a la app con su usuario y contraseña de Silogtran (se valida contra el API de Silogtran; solo entran los usuarios registrados por el administrador; límite de intentos y mensajes uniformes para no usar la app como adivinador de contraseñas ni bloquear cuentas de Silogtran). Cada persona ve solo las opciones de su rol; las parametrizaciones se ven (según permisos) pero la administración de usuarios y credenciales es solo del administrador.
 
