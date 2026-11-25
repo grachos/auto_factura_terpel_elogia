@@ -191,16 +191,14 @@ Ver [`.env.example`](.env.example) (sin valores reales). Las principales: `AUTH_
 
 | Tema | Estado |
 |---|---|
-| **Buzón real / Exchange Online** | No probado: faltan credenciales y la autorización de TI. `GraphMailSource` y la autenticación MSAL con certificado/secreto solo se probaron contra un Graph simulado (y `graph:check` sin credenciales). |
-| **Muestra real de la plantilla** | La plantilla es **sintética**. Etiquetas, estructura HTML y variantes reales deben validarse con una muestra anonimizada; hasta entonces el parser puede marcar incidencias. |
-| **Volumen en 0** | Ocurre con frecuencia. En la Fase 2 no debe compararse el volumen cuando venga en 0. |
-| **Clave de negocio** | Provisional (número de transporte); confirmar con negocio si debe incluir el número de gasto (`BUSINESS_KEY_STRATEGY=transport_expense`). |
+| **Buzón real / Exchange Online** | Probado: lectura del buzón dedicado con certificado (200) y rechazo de otro buzón (403). El buzón recibe reenvíos hechos a mano; falta que TI cree la regla que copie allí los correos de Terpel. |
+| **Plantilla real** | Validada con 6 correos reales reenviados (texto plano). Pendiente: variantes HTML y correos con planta de cargue, corregidos o con remisión informada. |
+| **Reenvíos** | Se aceptan si el asunto es RV:/RE:/FW: y el cuerpo cita "De:" el remitente de Terpel, sin importar quién reenvíe. El "De:" citado no está autenticado: se puede limitar con `mail_configs.allowed_forwarders`. |
+| **Clave de negocio** | Número de transporte (confirmado: el número de gasto siempre es distinto). |
+| **Volumen** | Unidad confirmada: galones. Frecuentemente viene en 0 (valor válido); en la Fase 2 no debe compararse en 0. |
+| **Planta de cargue** | No se evalúa (decisión del negocio). |
 | **Informe Silogtran y su documentación** | No disponible; es insumo de la Fase 2 (no implementada). |
-| **Supabase real** | Las migraciones se verificaron en PGlite (PostgreSQL embebido), no en un proyecto Supabase ni con Supabase CLI/Docker (no disponible en el entorno de desarrollo). Pendientes: `supabase db push`, el adaptador `SupabaseStorage` (subida y URL firmada), la verificación de JWT con tokens reales/JWKS y el adaptador `pg` contra un servidor real. |
-| **Despliegue en Vercel** | La función `api/index.ts` (con reescritura de `/api/*` en `vercel.json`) compila y comparte el despachador con Fastify (probado), pero no se desplegó. Confirmar límites de duración del plan. |
-| **Excel de una re-ejecución** | Comportamiento documentado de la Fase 1: el Excel de una ejecución repetida no arrastra las incidencias de la primera. Quien descargue solo el Excel de la re-ejecución verá, p. ej., la corrección con valores distintos (clave 000125) como duplicado y sin incidencias, aunque sigue requiriendo revisión. Ver siempre el Excel de la ejecución original o la pantalla de incidencias. Posible mejora: arrastrar las incidencias abiertas de las autorizaciones del lote. |
-| **Retención y datos personales** | Plazo de retención del cuerpo de los correos y de datos de conductores por definir con jurídica. |
-| **Rendimiento con volumen real** | No medido; el diseño asume páginas de 50 mensajes por paso. |
+| **Producción** | Desplegado en Vercel sobre el esquema `terpel` de un proyecto Supabase compartido; los Excel se guardan en PostgreSQL (`STORAGE_DRIVER=db`). El plan gratuito de Vercel no permite uso comercial: pasar a Pro antes del uso diario. |
 
 ## Seguridad y privacidad
 
