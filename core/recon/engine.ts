@@ -118,7 +118,8 @@ export function compareRecord(t: TerpelInput, c: SilogCandidate): Difference[] {
 }
 
 function classifySingle(t: TerpelInput, c: SilogCandidate, trace: TraceStep[], extra: Difference[], reason: string): EngineResult {
-  const differences = [...compareRecord(t, c), ...extra];
+  const cmp = compareRecord(t, c);
+  const differences = [...cmp, ...extra.filter((x) => !(x.field === 'plate' && cmp.some((d) => d.field === 'plate')))];
   const adjustable = differences.some((d) => d.severity === 'adjustable');
   return {
     status: adjustable ? 'MATCH_WITH_DIFFERENCES' : 'EXACT',
