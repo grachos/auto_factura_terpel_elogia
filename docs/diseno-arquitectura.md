@@ -172,3 +172,21 @@ Datos de conductor: datos personales (Ley 1581 de 2012) → acceso por rol, sin 
 - Versión vigente ante corrección: la más reciente + revisión.
 - Muestra real anonimizada HTML y variantes: pendiente.
 - Reenvíos internos: revisión con `SENDER_NOT_ALLOWED`.
+
+
+## 10. Usuarios, roles, cuentas de Silogtran y modo asistido / no asistido (diseño acordado; sin implementar)
+
+**Usuarios y credenciales (solo administrador).** Cada usuario de la app tiene su usuario de Silogtran, un rol (administrador / facturación) y, opcionalmente, su contraseña de Silogtran guardada CIFRADA (AES-256-GCM, clave solo en el servidor, AAD = id del registro; nunca se muestra ni se devuelve por la API; botón "Probar conexión"; auditoría). Las personas pueden ingresar a la app con su usuario y contraseña de Silogtran (se valida contra el API de Silogtran; solo entran los usuarios registrados por el administrador; límite de intentos y mensajes uniformes para no usar la app como adivinador de contraseñas ni bloquear cuentas de Silogtran). Cada persona ve solo las opciones de su rol; las parametrizaciones se ven (según permisos) pero la administración de usuarios y credenciales es solo del administrador.
+
+**Cuentas de servicio de Silogtran (parametrizadas por el administrador).** Una cuenta de AJUSTES (con la que se escribe el cambio de tarifa en Silogtran) y la(s) cuenta(s) de FACTURACIÓN. Deben estar sin cambio de contraseña pendiente ni verificación en dos pasos. La app siempre registra qué persona pidió cada acción, aunque en Silogtran quede la cuenta de servicio.
+
+**Permisos.** Facturación puede proponer, aprobar y APLICAR ajustes; los ajustes se escriben en Silogtran con la cuenta de ajustes parametrizada. Solo el administrador edita parámetros y administra usuarios/credenciales.
+
+**Modo asistido / no asistido.** Un selector (por defecto ASISTIDO) define cómo se ejecuta el proceso conciliar → ajustar → facturar:
+- ASISTIDO: la app propone y una persona aprueba cada paso (ajustes y facturas).
+- NO ASISTIDO (automático): tras conciliar, la app aplica los ajustes y factura sola SOLO los servicios que cumplan al 100% las condiciones de elegibilidad; todo lo demás queda en la bandeja de revisión sin tocarse. Al final entrega un reporte completo de lo hecho.
+- Condiciones de elegibilidad propuestas (por confirmar): un único despacho candidato; solo diferencias ajustables (remesa_peso y/o valor); volumen de Terpel > 0 (o volumen 0 solo si el parámetro lo permite y el valor coincide exacto); tarifa = valor ÷ galones EXACTA; registro CUMPLIDO y sin factura previa en Silogtran; datos completos de facturación.
+- Protecciones: el modo no asistido solo lo habilita el administrador; interruptor de apagado; tope de servicios por ejecución; idempotencia por servicio (nunca doble ajuste ni doble factura); verificar el estado antes de escribir y confirmar después; ante un resultado incierto se consulta el estado antes de reintentar; un fallo individual deja ese servicio en revisión y el lote sigue, pero un fallo sistémico (login, WAF, errores repetidos) detiene el lote.
+- Reporte por ejecución (pantalla y Excel): por cada servicio, cada paso (conciliación, ajuste, factura), valores antes/después, cuenta usada, quién lo pidió, número de factura/CUFE/estado y errores o motivos de revisión.
+
+**Orden de construcción propuesto (cada incremento requiere aprobación):** (1) usuarios, roles y credenciales cifradas + ingreso con usuario de Silogtran; (2) Fase 3: propuesta/simulación/aprobación y aplicación de ajustes (con adaptador simulado hasta mapear la pantalla "Procedimiento de Cambio Tarifa"); (3) Fase 4: facturación con adaptador simulado; (4) orquestador asistido / no asistido y reporte.
