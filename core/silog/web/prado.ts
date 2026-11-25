@@ -29,6 +29,13 @@ export class PradoPage {
     $('[id][name]').each((_, el) => { const a = (el as { attribs: Record<string, string> }).attribs; this.ids.set((a.id as string).toLowerCase(), a.name as string); });
   }
 
+  /** Postback (envío del formulario). SOLO se usa para la búsqueda de solo lectura; el diagnóstico nunca lo usa con Grabar. */
+  async postback(target: string, extra: Record<string, string> = {}): Promise<WebResponse> {
+    const page = await this.client.request(this.action, { method: 'POST', form: { ...this.fields, PRADO_POSTBACK_TARGET: target, ...extra } });
+    this.load(page);
+    return page;
+  }
+
   /** Callback PRADO genérico (TEventTriggeredCallback); devuelve el texto de respuesta y los campos actualizados. */
   async callback(target: string): Promise<{ text: string; applied: string[] }> {
     const res = await this.client.request(this.action, { method: 'POST', form: { ...this.fields, PRADO_CALLBACK_TARGET: target, PRADO_CALLBACK_PARAMETER: 'null' } });

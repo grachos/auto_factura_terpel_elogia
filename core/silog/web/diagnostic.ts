@@ -72,10 +72,15 @@ export function describePage(html: string): PageStructure {
 }
 
 export interface Step { step: string; ok: boolean; detail?: unknown }
+export interface AfterSearch { controls: ControlInfo[]; tables: TableInfo[]; widgets: WidgetInfo[]; messages: string[]; validators: WidgetInfo[] }
 export interface DiagnosticResult {
   page: string; reused: boolean; steps: Step[]; structure: PageStructure | null;
-  lookup: { requested: boolean; steps: Step[]; tables: TableInfo[]; numericFields: { name: string; value: string | null; disabled: boolean; readOnly: boolean }[] } | null;
+  lookup: { requested: boolean; steps: Step[]; tables: TableInfo[]; numericFields: { name: string; value: string | null; disabled: boolean; readOnly: boolean }[]; afterSearch: AfterSearch | null } | null;
 }
+
+/** Solo el botón «Buscar» (lectura) puede enviarse; jamás Grabar ni nada que persista. */
+export const isSearchButton = (c: { type: string | null; name: string | null; id: string | null }): boolean =>
+  c.type === 'submit' && /buscar/i.test(`${c.id ?? ''} ${c.name ?? ''}`) && !/grabar|guardar|save|generar|aceptar|eliminar|anular/i.test(`${c.id ?? ''} ${c.name ?? ''}`);
 
 const UNSAFE = /grabar|guardar|save|submit|btn|button|generar|aceptar|eliminar|anular/i;
 export const isSafeTarget = (t: string | null): t is string => !!t && !UNSAFE.test(t);
@@ -116,19 +121,19 @@ export function summarizeFragments(frags: string[]): { tables: TableInfo[]; nume
  * Etapa 1: GET de la pantalla y su estructura. Etapa 2 (opcional): casilla/campo Remesa con pasos de lectura.
  * Cada paso se reporta. No hay ningún POST a botones y nunca se pulsa Grabar.
  */
-export async function runDiagnostic(client: SilogWebClient, opts: { lookup: boolean; remesa: string; reused: boolean }): Promise<DiagnosticResult> {
+export async function runDiagnostic(client: SilogWebClient, opts: { lookup: boolean; search?: boolean; remesa: string; reused: boolean }): Promise<DiagnosticResult> {
   const steps: Step[] = [];
   const page = await client.enqueue(() => client.request(TARIFF_PAGE));
   const structure = describePage(page.text);
   if (structure.looksLikeLogin) throw new SilogWebError('WEB_BAD_PAGE', 'Silogtran devolvió la pantalla de login en lugar de la pantalla de cambio de tarifa (sesión no válida o sin permiso)');
   steps.push({ step: 'GET pantalla de cambio de tarifa', ok: true, detail: { controls: structure.controls.length, widgets: structure.widgets.length, tables: structure.tables.length } });
   const result: DiagnosticResult = { page: TARIFF_PAGE, reused: opts.reused, steps, structure, lookup: null };
-  if (!opts.lookup) return result;
+  if (!opts.lookup && !opts.search) return result;
 
   const lookupSteps: Step[] = [];
   const tables: TableInfo[] = [];
   const numericFields: { name: string; value: string | null; disabled: boolean; readOnly: boolean }[] = [];
-  result.lookup = { requested: true, steps: lookupSteps, tables, numericFields };
+  result.lookup = { requested: true, steps: lookupSteps, tables, numericFields, afterSearch: null };
   await client.enqueue(async () => {
     const prado = new PradoPage(client, page);
     const isRemesa = (s: string | null | undefined): boolean => !!s && /remesa/i.test(s) && !/razon|raz[oó]n|grabar|btn/i.test(s);
@@ -172,6 +177,23 @@ export async function runDiagnostic(client: SilogWebClient, opts: { lookup: bool
     }
     const id = ac?.id ?? input?.id ?? null;
     if (id) await runTriggers(id, 'campo Remesa');
+    if (opts.search) {
+      const btn = structure.controls.find(isSearchButton);
+      const note = structure.controls.find((c) => c.tag === 'textarea');
+      const lock = structure.controls.find((c) => c.type === 'hidden' && /^ctl0\$MainModule\$IDLockHidden_/.test(c.name ?? '') && /buscar/i.test(c.name ?? ''));
+      if (!btn?.name) { lookupSteps.push({ step: 'botón Buscar (envío de solo lectura)', ok: false, detail: 'no se encontró un botón de búsqueda' }); }
+      else {
+        if (note?.name) prado.fields[note.name] = 'diagnostico de solo lectura'; // el validador de PRADO exige la razón; no se graba nada
+        const extra: Record<string, string> = { PRADO_POSTBACK_PARAMETER: '', [btn.name]: 'Buscar' };
+        if (lock?.name) extra[lock.name] = 'true';
+        const resp = await prado.postback('', extra);
+        const after = describePage(resp.text);
+        const sum = summarizeFragments([resp.text]);
+        result.lookup!.afterSearch = { controls: after.controls, tables: after.tables, widgets: after.widgets, messages: after.messages, validators: after.validators };
+        numericFields.push(...sum.numeric.filter((n) => !numericFields.some((x) => x.name === n.name)));
+        lookupSteps.push({ step: 'botón Buscar (envío de solo lectura, sin Grabar)', ok: true, detail: { tables: after.tables.length, controls: after.controls.length, messages: after.messages.length } });
+      }
+    }
     // Estructura final de lo que la página tiene ahora (sin enviar nada).
     const sumPage = summarizeFragments([prado.html]);
     numericFields.push(...sumPage.numeric.filter((n) => !numericFields.some((x) => x.name === n.name)));

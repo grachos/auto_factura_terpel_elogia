@@ -326,20 +326,21 @@ async function dispatchAdjust(
     const purpose: WebPurpose = body.purpose === 'invoice' ? 'invoice' : 'adjust';
     const remesa = body.remesa === undefined ? '0101228393' : String(body.remesa);
     if (!/^\d{1,12}$/.test(remesa)) throw new AppError(400, 'INVALID_FIELD', 'Campo inválido: remesa');
-    const lookup = body.lookup === true;
+    const search = body.search === true; // envío del botón Buscar (lectura); bandera explícita
+    const lookup = body.lookup === true || search;
     const base = ctx.config.silog.webBaseUrl || (ctx.config.silog.baseUrl ? new URL(ctx.config.silog.baseUrl).origin : '');
     try {
       const s = await openWebSession({ db: ctx.db, encryptionKey: ctx.config.security.encryptionKey, baseUrl: base, waf: ctx.waf, fetchFn: ctx.webFetch }, purpose, session.userId);
       try {
-        const out = await runDiagnostic(s.client, { lookup, remesa, reused: s.reused });
-        await audit(ctx.db, session.userId, 'silog_web.diagnostic', 'silog_web_session', purpose, { lookup, ok: true });
+        const out = await runDiagnostic(s.client, { lookup, search, remesa, reused: s.reused });
+        await audit(ctx.db, session.userId, 'silog_web.diagnostic', 'silog_web_session', purpose, { lookup, search, ok: true });
         return ok({ ok: true, wafSolved: s.client.wafSolved, ...out });
       } finally {
         await s.close();
       }
     } catch (e) {
       if (e instanceof SilogWebError) {
-        await audit(ctx.db, session.userId, 'silog_web.diagnostic', 'silog_web_session', purpose, { lookup, ok: false, code: e.code });
+        await audit(ctx.db, session.userId, 'silog_web.diagnostic', 'silog_web_session', purpose, { lookup, search, ok: false, code: e.code });
         throw new AppError(e.status, e.code, e.message);
       }
       throw e;

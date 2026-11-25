@@ -9,7 +9,7 @@ import type { Db } from '../core/db/types.js';
 import { handleRequest } from '../core/http/router.js';
 import { setLogSink } from '../core/logger.js';
 import { SilogWebClient } from '../core/silog/web/client.js';
-import { describePage, isSafeTarget, runDiagnostic, summarizeFragments } from '../core/silog/web/diagnostic.js';
+import { describePage, isSafeTarget, isSearchButton, runDiagnostic, summarizeFragments } from '../core/silog/web/diagnostic.js';
 import { openWebSession } from '../core/silog/web/session.js';
 import { HttpWafSolver, signWafRequest, verifyWafRequest } from '../core/silog/web/waf.js';
 import type { WafSolver } from '../core/silog/web/waf.js';
@@ -34,18 +34,17 @@ const twoFaHtml = `<html><body><form method="post" action="./x"><input name="${P
 
 const tariffHtml = `<html><head><title>Cambio Tarifa</title></head><body><form method="post" action="./index.php?page=Despacho.Remesa_003.CambioTarifa_105">
 <input type="hidden" name="PRADO_PAGESTATE" value="zzz"/><input type="hidden" name="PRADO_POSTBACK_TARGET" value=""/>
-<label for="ctl0_MainModule_remesa">Remesa</label>
-<input type="checkbox" id="ctl0_MainModule_chkremesa" name="ctl0$MainModule$chkremesa"/>
-<input type="text" id="ctl0_MainModule_remesa" name="ctl0$MainModule$remesa" value="9999999999"/>
-<label>Razón de cambio</label><textarea id="ctl0_MainModule_razon" name="ctl0$MainModule$razon"></textarea>
-<input type="submit" id="ctl0_MainModule_Grabar" name="ctl0$MainModule$Grabar" value="Grabar"/>
-<table id="ctl0_MainModule_tabla"><tr><th>Solicitud</th><th>Item</th><th>Peso Remesa</th><th>Cantidad Remesa</th><th>Nueva Tarifa</th></tr>
-<tr><td>1</td><td>1</td><td>100</td><td><input name="ctl0$MainModule$cantidad" id="ctl0_MainModule_cantidad" value="100"/></td><td><input name="ctl0$MainModule$tarifa" id="ctl0_MainModule_tarifa"/></td></tr></table>
-<script>new Prado.WebUI.CAutoComplete({'ID':'ctl0_MainModule_remesa','EventTarget':'ctl0$MainModule$remesa'});
-new Prado.WebUI.TEventTriggeredCallback({'ID':'ctl0_MainModule_remesa','EventTarget':'ctl0$MainModule$cargar','EventName':'change'});
-new Prado.WebUI.TEventTriggeredCallback({'ID':'ctl0_MainModule_remesa','EventTarget':'ctl0$MainModule$btnGrabarCb','EventName':'change'});
-new Prado.WebUI.TRequiredFieldValidator({'ID':'ctl0_MainModule_v1','ControlToValidate':'ctl0_MainModule_razon','ErrorMessage':'La razón es obligatoria','ValidationGroup':'g1'});</script>
+<table><tr><td>Remesa:</td><td><input type="text" id="ctl0_MainModule_remesa_codigo" name="ctl0$MainModule$remesa_codigo" value="9999999999"/>
+<input type="hidden" id="ctl0_MainModule_remesa_codigo_IDHidden" name="ctl0$MainModule$remesa_codigo$IDHidden" value=""/></td><td>Razón de cambio:</td>
+<td><textarea id="ctl0_MainModule_cambiotarifa_nota" name="ctl0$MainModule$cambiotarifa_nota"></textarea></td></tr></table>
+<input type="submit" id="ctl0_MainModule_buscar" name="ctl0$MainModule$buscar" value="Buscar"/>
+<input type="hidden" id="ctl0_MainModule_IDLockHidden_ctl0_MainModule_buscar" name="ctl0$MainModule$IDLockHidden_ctl0_MainModule_buscar" value=""/>
+<table><tr><th>Solicitud</th><th>Item</th><th>Cliente</th><th>Tipo Tarifa</th><th>Peso Remesa</th><th>Cantidad Remesa</th><th>Nueva Tarifa</th></tr></table>
+<script>new Prado.WebUI.CAutoComplete({'ID':'ctl0_MainModule_remesa_codigo','EventTarget':'ctl0$MainModule$remesa_codigo'});
+new Prado.WebUI.TButton({'ID':'ctl0_MainModule_buscar','EventTarget':'ctl0$MainModule$buscar','ValidationGroup':'Requeridos'});
+new Prado.WebUI.CRequiredFieldValidator({'ID':'ctl0_MainModule_ctl2','ControlToValidate':'ctl0_MainModule_cambiotarifa_nota','ValidationGroup':'Requeridos'});</script>
 </form></body></html>`;
+const resultHtml = tariffHtml.replace('<th>Nueva Tarifa</th></tr></table>', `<th>Nueva Tarifa</th></tr><tr><td>1</td><td>1</td><td>Cliente X</td><td>GALON</td><td>10460</td><td><input name="ctl0$MainModule$ctl9$cantidad" value="10460"/></td><td><input name="ctl0$MainModule$ctl9$tarifa" value="235"/></td></tr></table><input type="submit" name="ctl0$MainModule$grabar" value="Grabar"/>`);
 
 interface FakeOpts { user: string; password: string; page?: 'ok' | 'change' | '2fa'; waf?: boolean }
 function fakeSilog(o: FakeOpts): { fetch: typeof fetch; log: { method: string; url: string; body: string }[]; posts: () => number } {
@@ -70,6 +69,12 @@ function fakeSilog(o: FakeOpts): { fetch: typeof fetch; log: { method: string; u
       if (o.page === 'change') return html(changeHtml);
       if (o.page === '2fa') return html(twoFaHtml);
       return html(costHtml);
+    }
+    if (method === 'POST' && q.includes('CambioTarifa_105')) {
+      const p = new URLSearchParams(body);
+      if (p.get('PRADO_CALLBACK_TARGET')) return html('<li title="false" ctl0_mainmodule_remesa_codigo="0101228393" ctl0_mainmodule_remesa_codigo_idhidden="55"><table><tr><td>0101228393</td></tr></table></li>');
+      if (p.get('ctl0$MainModule$buscar') !== null) return html(resultHtml);
+      return html('');
     }
     if (method === 'GET' && q.includes('CambioTarifa_105')) return loggedIn && cookie.includes('PHPSESSID') ? html(tariffHtml) : html(loginHtml());
     if (method === 'GET') return loggedIn && cookie.includes('PHPSESSID') ? html(homeHtml) : html(loginHtml());
@@ -229,35 +234,46 @@ describe('sesión web reutilizable (cifrada) y bloqueo', () => {
 describe('diagnóstico (estructura de la pantalla)', () => {
   it('describe controles, widgets, autocompletado, tablas, etiquetas y validadores; sin valores', () => {
     const st = describePage(tariffHtml);
-    expect(st.controls.map((c) => c.id)).toEqual(expect.arrayContaining(['ctl0_MainModule_chkremesa', 'ctl0_MainModule_remesa', 'ctl0_MainModule_razon', 'ctl0_MainModule_Grabar']));
-    expect(st.controls.find((c) => c.id === 'ctl0_MainModule_remesa')).not.toHaveProperty('value');
+    expect(st.controls.map((c) => c.id)).toEqual(expect.arrayContaining(['ctl0_MainModule_remesa_codigo', 'ctl0_MainModule_cambiotarifa_nota', 'ctl0_MainModule_buscar']));
+    expect(st.controls.find((c) => c.id === 'ctl0_MainModule_remesa_codigo')).not.toHaveProperty('value');
     expect(JSON.stringify(st)).not.toContain('9999999999'); // el valor del campo no se devuelve
-    expect(st.autoCompletes).toEqual(['ctl0_MainModule_remesa']);
-    expect(st.widgets.filter((w) => w.cls === 'TEventTriggeredCallback')).toHaveLength(2);
-    expect(st.tables[0]?.headers).toEqual(['Solicitud', 'Item', 'Peso Remesa', 'Cantidad Remesa', 'Nueva Tarifa']);
-    expect(st.tables[0]?.inputs.map((i) => i.id)).toEqual(['ctl0_MainModule_cantidad', 'ctl0_MainModule_tarifa']);
-    expect(st.labels).toEqual(expect.arrayContaining(['Remesa', 'Razón de cambio']));
-    expect(st.validators[0]).toMatchObject({ controlToValidate: 'ctl0_MainModule_razon', validationGroup: 'g1' });
+    expect(st.autoCompletes).toEqual(['ctl0_MainModule_remesa_codigo']);
+    expect(st.widgets.find((w) => w.cls === 'TButton')).toMatchObject({ eventTarget: 'ctl0$MainModule$buscar', validationGroup: 'Requeridos' });
+    expect(st.tables.some((t) => t.headers.join('|') === 'Solicitud|Item|Cliente|Tipo Tarifa|Peso Remesa|Cantidad Remesa|Nueva Tarifa')).toBe(true);
+    expect(st.validators[0]).toMatchObject({ controlToValidate: 'ctl0_MainModule_cambiotarifa_nota', validationGroup: 'Requeridos' });
     expect(st.looksLikeLogin).toBe(false);
     expect(describePage(loginHtml()).looksLikeLogin).toBe(true);
   });
   it('destinos inseguros (Grabar, botones) se descartan; nunca se hace POST a botones', async () => {
     expect(isSafeTarget('ctl0$MainModule$cargar')).toBe(true);
     for (const t of ['ctl0$MainModule$Grabar', 'ctl0$MainModule$btnGrabarCb', 'ctl0$x$BtnAceptar', null]) expect(isSafeTarget(t as string)).toBe(false);
+    expect(isSearchButton({ type: 'submit', name: 'ctl0$MainModule$buscar', id: 'x' })).toBe(true);
+    expect(isSearchButton({ type: 'submit', name: 'ctl0$MainModule$grabar', id: 'x' })).toBe(false);
+    expect(isSearchButton({ type: 'submit', name: 'ctl0$MainModule$buscar_y_grabar', id: 'x' })).toBe(false);
     const s = fakeSilog({ user: 'cuenta', password: PASS });
     const c = new SilogWebClient({ baseUrl: BASE, fetchFn: s.fetch });
     await c.login('cuenta', PASS);
     const before = s.log.length;
     const r = await runDiagnostic(c, { lookup: true, remesa: '0101228393', reused: false });
     const posts = s.log.slice(before).filter((l) => l.method === 'POST');
-    expect(r.lookup?.steps.map((x) => x.step)).toEqual(expect.arrayContaining(['identificar controles Remesa', 'marcar casilla Remesa (local)', 'autocompletar remesa (callback de lectura)']));
+    expect(r.lookup?.steps.map((x) => x.step)).toEqual(expect.arrayContaining(['identificar controles Remesa', 'autocompletar remesa (callback de lectura)']));
+    expect(posts.length).toBe(1); // solo el callback de autocompletado
     for (const p of posts) {
       const f = new URLSearchParams(p.body);
       expect(f.get('PRADO_CALLBACK_TARGET'), 'solo callbacks de lectura').not.toBeNull();
-      expect(f.get('ctl0$MainModule$Grabar')).toBeNull();
       expect(f.get('PRADO_POSTBACK_TARGET')).not.toMatch(/grabar/i);
-      expect(f.get('PRADO_CALLBACK_TARGET')).not.toMatch(/grabar|btn/i);
     }
+    // con la bandera de búsqueda: un envío del botón Buscar (lectura), jamás Grabar
+    const before2 = s.log.length;
+    const r2 = await runDiagnostic(c, { lookup: true, search: true, remesa: '0101228393', reused: false });
+    const posts2 = s.log.slice(before2).filter((l) => l.method === 'POST').map((l) => new URLSearchParams(l.body));
+    expect(posts2.length).toBe(2);
+    expect(posts2[1]?.get('ctl0$MainModule$buscar')).toBe('Buscar');
+    for (const f of posts2) expect([...f.keys()].some((k) => /grabar/i.test(k)) && f.get('ctl0$MainModule$grabar') !== null).toBe(false);
+    const after = r2.lookup?.afterSearch;
+    expect(after?.tables.some((t) => t.inputs.some((i) => /cantidad/.test(i.name ?? '')))).toBe(true);
+    expect(after?.controls.some((x) => /grabar/i.test(x.name ?? ''))).toBe(true); // se observa el botón, nunca se envía
+    expect(r2.lookup?.numericFields).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'ctl0$MainModule$ctl9$tarifa', value: '235' })]));
   });
   it('resumen de fragmentos: valores numéricos de peso/cantidad/tarifa', () => {
     const s = summarizeFragments([`<table><tr><th>Peso</th></tr><tr><td><input name="x$peso" value="10460" readonly/><input name="x$tarifa" value="235"/><input name="x$nombre" value="Pepe"/></td></tr></table>`]);
@@ -297,7 +313,7 @@ describe('endpoint de diagnóstico (admin)', () => {
     expect(r.status).toBe(200);
     const out = j<{ ok: boolean; structure: { tables: { headers: string[] }[] }; lookup: { steps: { step: string }[] } }>(r);
     expect(out.ok).toBe(true);
-    expect(out.structure.tables[0]?.headers).toContain('Nueva Tarifa');
+    expect(out.structure.tables.flatMap((t) => t.headers)).toContain('Nueva Tarifa');
     expect(out.lookup.steps.length).toBeGreaterThan(0);
     const text = JSON.stringify(r.json) + JSON.stringify((await ctx.db.query('select * from audit_log')).rows);
     for (const secret of [PASS, 'PHPSESSID', 'aws-waf', KEY, SECRET, '9999999999']) expect(text, secret).not.toContain(secret);
