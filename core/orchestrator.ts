@@ -370,7 +370,7 @@ async function processMessage(tx: Queryable, runId: string, cfg: MailConfigRow, 
     }
   } else {
     await tx.query(`update services set current_authorization_id = $2 where id = $1`, [serviceId, authId]);
-    if (subj.isForward) {
+    if (subj.isForward && trust.reason !== 'internal_forward') {
       issues.push({ code: 'FORWARDED_MESSAGE', severity: 'info', field: null, detail: 'Mensaje reenviado (RV:/FW:) sin versión previa' });
     }
   }
