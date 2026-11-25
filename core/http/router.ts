@@ -1,5 +1,13 @@
 import { getUserRole } from '../auth.js';
 import { DEMO_USERS } from '../auth.js';
+import { isAppToken, verifyAppToken } from '../appAuth.js';
+import { can, permissionsOf } from '../permissions.js';
+import type { Permission } from '../permissions.js';
+import { silogLogin } from '../silogLogin.js';
+import {
+  createUser, deleteUserPassword, listServiceCredentials, listUsers, parsePurpose, saveServiceCredential, saveUserPassword, testServiceCredential,
+  testUserCredential, updateUser,
+} from '../users.js';
 import type { AppContext } from '../context.js';
 import { AppError } from '../errors.js';
 import { generateExport } from '../excel.js';
@@ -35,7 +43,6 @@ export interface HttpResponse {
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const WRITE_ROLES: Role[] = ['operator', 'admin'];
 
 function ok(json: unknown, status = 200): HttpResponse {
   return { status, json, headers: { 'Cache-Control': 'no-store' } };
@@ -61,20 +68,35 @@ interface Session {
   userId: string;
   email: string | null;
   role: Role;
+  kind: 'supabase' | 'silogtran';
+  displayName: string | null;
+  silogUser: string | null;
 }
 
 async function authenticate(ctx: AppContext, req: HttpRequest): Promise<Session> {
   const token = bearer(req.headers);
   if (!token) throw new AppError(401, 'UNAUTHENTICATED', 'Inicie sesión para continuar');
+  if (isAppToken(token)) {
+    // Token propio (ingreso con usuario de Silogtran): el usuario y su rol se comprueban en BD en CADA petición.
+    const claims = await verifyAppToken(ctx.config.security.appSessionSecret, token);
+    if (!claims) throw new AppError(401, 'UNAUTHENTICATED', 'Sesión inválida o vencida');
+    const r = await ctx.db.query<{ id: string; silog_user: string; display_name: string | null; role: Role; active: boolean; session_version: number }>(
+      'select id, silog_user, display_name, role, active, session_version from app_users where id = $1',
+      [claims.id],
+    );
+    const u = r.rows[0];
+    if (!u || !u.active || u.session_version !== claims.sessionVersion) throw new AppError(401, 'UNAUTHENTICATED', 'Sesión inválida o vencida');
+    return { userId: u.id, email: null, role: u.role, kind: 'silogtran', displayName: u.display_name, silogUser: u.silog_user };
+  }
   const user = await ctx.auth.verify(token);
   if (!user) throw new AppError(401, 'UNAUTHENTICATED', 'Sesión inválida o vencida');
   const role = await getUserRole(ctx.db, user.id);
   if (!role) throw new AppError(403, 'NO_ROLE', 'Su usuario no tiene un rol asignado');
-  return { userId: user.id, email: user.email, role };
+  return { userId: user.id, email: user.email, role, kind: 'supabase', displayName: null, silogUser: null };
 }
 
-function requireRole(s: Session, roles: Role[]): void {
-  if (!roles.includes(s.role)) throw new AppError(403, 'FORBIDDEN', 'No tiene permisos para esta acción');
+function requirePermission(s: Session, p: Permission): void {
+  if (!can(s.role, p)) throw new AppError(403, 'FORBIDDEN', 'No tiene permisos para esta acción');
 }
 
 function runId(seg: string | undefined): string {
@@ -133,6 +155,7 @@ async function dispatch(ctx: AppContext, req: HttpRequest, setRoute: (r: string)
       supabaseAnonKey: ctx.auth.mode === 'supabase' ? ctx.config.supabase.anonKey || null : null,
       demoUsers: ctx.auth.mode === 'demo' ? DEMO_USERS.map((u) => ({ email: u.email, role: u.role })) : [],
       silogSource: ctx.silog?.kind ?? 'none',
+      silogLogin: !!ctx.silogAuth && ctx.config.security.appSessionSecret.length >= 32,
     };
     return ok(dto);
   }
@@ -143,6 +166,21 @@ async function dispatch(ctx: AppContext, req: HttpRequest, setRoute: (r: string)
     const r = await ctx.auth.demoLogin(str(body.email, 'email'), str(body.password, 'password'));
     if (!r) throw new AppError(401, 'BAD_CREDENTIALS', 'Correo o contraseña incorrectos');
     return ok({ token: r.token });
+  }
+
+  if (a === 'auth' && b === 'silog-login' && parts.length === 2 && is('POST', '/auth/silog-login')) {
+    const body = asObject(req.body);
+    const ip = (req.headers['x-forwarded-for'] ?? '').split(',')[0]?.trim() || req.headers['x-real-ip'] || req.headers['x-remote-addr'] || 'unknown';
+    try {
+      return ok(await silogLogin(ctx, { usuario: body.usuario, clave: body.clave, ip }));
+    } catch (e) {
+      if (e instanceof AppError && e.code === 'TOO_MANY_ATTEMPTS') {
+        const res = errorResponse(e);
+        res.headers = { ...res.headers, 'Retry-After': String(e.details?.retryAfterSeconds ?? 900) };
+        return res;
+      }
+      throw e;
+    }
   }
 
   if (a === 'files' && parts.length === 1 && is('GET', '/files')) {
@@ -167,17 +205,20 @@ async function dispatch(ctx: AppContext, req: HttpRequest, setRoute: (r: string)
   const session = await authenticate(ctx, req);
 
   if (a === 'me' && parts.length === 1 && is('GET', '/me')) {
-    const me: MeDto = { id: session.userId, email: session.email, role: session.role };
+    const me: MeDto = {
+      id: session.userId, email: session.email, role: session.role, permissions: permissionsOf(session.role),
+      displayName: session.displayName, silogUser: session.silogUser, loginKind: session.kind,
+    };
     return ok(me);
   }
 
   if (a === 'mail-config' && parts.length === 1) {
     if (is('GET', '/mail-config')) {
-      requireRole(session, ['admin']); // misma regla que RLS: mail_configs solo para administradores
+      requirePermission(session, 'mail.config'); // misma regla que RLS: mail_configs solo para administradores
       return ok(await getMailConfigDto(ctx.db));
     }
     if (is('PUT', '/mail-config')) {
-      requireRole(session, ['admin']);
+      requirePermission(session, 'mail.config');
       const body = asObject(req.body);
       const strategy = body.businessKeyStrategy;
       if (strategy !== 'transport_number' && strategy !== 'transport_expense') {
@@ -206,7 +247,7 @@ async function dispatch(ctx: AppContext, req: HttpRequest, setRoute: (r: string)
     if (parts.length === 1) {
       if (is('GET', '/runs')) return ok({ runs: await listRunDtos(ctx.db) });
       if (is('POST', '/runs')) {
-        requireRole(session, WRITE_ROLES);
+        requirePermission(session, 'import.run');
         const body = asObject(req.body);
         const run = await createRun(ctx, {
           actor: session.userId,
@@ -218,11 +259,11 @@ async function dispatch(ctx: AppContext, req: HttpRequest, setRoute: (r: string)
     }
     if (parts.length === 2 && is('GET', '/runs/:id')) return ok(await getRunDetail(ctx.db, runId(b)));
     if (parts.length === 3 && c === 'step' && is('POST', '/runs/:id/step')) {
-      requireRole(session, WRITE_ROLES);
+      requirePermission(session, 'import.run');
       return ok(await stepRun(ctx, runId(b), session.userId));
     }
     if (parts.length === 3 && c === 'export' && is('POST', '/runs/:id/export')) {
-      requireRole(session, WRITE_ROLES);
+      requirePermission(session, 'import.run');
       const result = await generateExport(ctx, runId(b), session.userId);
       return ok(result);
     }
@@ -236,10 +277,69 @@ async function dispatch(ctx: AppContext, req: HttpRequest, setRoute: (r: string)
     }
   }
 
+  if (a === 'auth' && b === 'logout' && parts.length === 2 && is('POST', '/auth/logout')) {
+    if (session.kind === 'silogtran') {
+      await ctx.db.query('update app_users set session_version = session_version + 1 where id = $1', [session.userId]);
+      await audit(ctx.db, session.userId, 'auth.logout', 'app_user', session.userId, {});
+    }
+    return ok({ ok: true });
+  }
+
+  const adm = await dispatchAdmin(ctx, session, parts, is, req);
+  if (adm) return adm;
+
   const recon = await dispatchRecon(ctx, session, parts, method, is, req);
   if (recon) return recon;
 
   throw new AppError(404, 'NOT_FOUND', 'Ruta no encontrada');
+}
+
+async function dispatchAdmin(
+  ctx: AppContext,
+  session: Session,
+  parts: string[],
+  is: (m: string, route: string) => boolean,
+  req: HttpRequest,
+): Promise<HttpResponse | null> {
+  const [a, b, c, d] = parts;
+  const secrets = { encryptionKey: ctx.config.security.encryptionKey };
+  const uid = (seg: string | undefined): string => {
+    if (!isUuid(seg)) throw new AppError(400, 'INVALID_ID', 'Identificador inválido');
+    return seg;
+  };
+  if (a === 'users') {
+    requirePermission(session, 'users.manage');
+    if (parts.length === 1 && is('GET', '/users')) return ok({ users: await listUsers(ctx.db) });
+    if (parts.length === 1 && is('POST', '/users')) {
+      const body = asObject(req.body);
+      return ok(await createUser(ctx.db, session.userId, { silogUser: body.silogUser, role: body.role, displayName: body.displayName }), 201);
+    }
+    if (parts.length === 2 && is('PUT', '/users/:id')) {
+      const body = asObject(req.body);
+      return ok(await updateUser(ctx.db, session.userId, uid(b), { role: body.role, active: body.active, displayName: body.displayName }));
+    }
+    if (parts.length === 3 && c === 'credential') {
+      requirePermission(session, 'credentials.manage');
+      if (is('PUT', '/users/:id/credential')) return ok(await saveUserPassword(ctx.db, secrets, session.userId, uid(b), asObject(req.body).password));
+      if (is('DELETE', '/users/:id/credential')) return ok(await deleteUserPassword(ctx.db, session.userId, uid(b)));
+    }
+    if (parts.length === 4 && c === 'credential' && d === 'test' && is('POST', '/users/:id/credential/test')) {
+      requirePermission(session, 'credentials.manage');
+      return ok(await testUserCredential(ctx.db, secrets, ctx.silogAuth, session.userId, uid(b)));
+    }
+  }
+  if (a === 'service-credentials') {
+    requirePermission(session, 'credentials.manage');
+    if (parts.length === 1 && is('GET', '/service-credentials')) return ok({ credentials: await listServiceCredentials(ctx.db) });
+    if (parts.length === 2 && is('PUT', '/service-credentials/:purpose')) {
+      const body = asObject(req.body);
+      return ok({ credentials: await saveServiceCredential(ctx.db, secrets, session.userId, parsePurpose(b), { silogUser: body.silogUser, password: body.password }) });
+    }
+    if (parts.length === 3 && c === 'test' && is('POST', '/service-credentials/:purpose/test')) {
+      return ok(await testServiceCredential(ctx.db, secrets, ctx.silogAuth, session.userId, parsePurpose(b)));
+    }
+  }
+  return null;
 }
 
 async function dispatchRecon(
@@ -258,7 +358,7 @@ async function dispatchRecon(
   };
 
   if (a === 'silogtran' && b === 'sync' && parts.length === 2 && is('POST', '/silogtran/sync')) {
-    requireRole(session, WRITE_ROLES);
+    requirePermission(session, 'recon.run');
     const body = asObject(req.body);
     return ok(await syncStep(deps, body.dateFrom, body.dateTo, body.cursor, session.userId));
   }
@@ -267,7 +367,7 @@ async function dispatchRecon(
     if (parts.length === 1) {
       if (is('GET', '/reconciliations')) return ok({ runs: await listReconRuns(ctx.db) });
       if (is('POST', '/reconciliations')) {
-        requireRole(session, WRITE_ROLES);
+        requirePermission(session, 'recon.run');
         const body = asObject(req.body);
         const run = await createReconRun(deps, { actor: session.userId, dateFrom: body.dateFrom, dateTo: body.dateTo, sync: body.sync === false ? false : true });
         return ok(run, 201);
@@ -275,7 +375,7 @@ async function dispatchRecon(
     }
     if (parts.length === 2 && is('GET', '/reconciliations/:id')) return ok(await getReconDetail(ctx.db, id(b)));
     if (parts.length === 3 && c === 'step' && is('POST', '/reconciliations/:id/step')) {
-      requireRole(session, WRITE_ROLES);
+      requirePermission(session, 'recon.run');
       return ok(await stepReconRun(deps, id(b), session.userId, async (dp, rid, actor) => void (await generateReconExport(dp, rid, actor))));
     }
     if (parts.length === 3 && c === 'results' && is('GET', '/reconciliations/:id/results')) {
@@ -283,7 +383,7 @@ async function dispatchRecon(
       return ok({ results: await listResults(ctx.db, id(b), st) });
     }
     if (parts.length === 3 && c === 'export' && is('POST', '/reconciliations/:id/export')) {
-      requireRole(session, WRITE_ROLES);
+      requirePermission(session, 'recon.run');
       return ok(await generateReconExport(ctx, id(b), session.userId));
     }
     if (parts.length === 4 && c === 'export' && d === 'url' && is('GET', '/reconciliations/:id/export/url')) {
@@ -299,43 +399,49 @@ async function dispatchRecon(
 
   if (a === 'reconciliation-results' && parts.length === 3) {
     if (c === 'resolve' && is('POST', '/reconciliation-results/:id/resolve')) {
-      requireRole(session, WRITE_ROLES);
+      requirePermission(session, 'recon.resolve');
       return ok(await resolveResult(ctx.db, session.userId, id(b), asObject(req.body).recordId));
     }
     if (c === 'alias' && is('POST', '/reconciliation-results/:id/alias')) {
-      requireRole(session, ['admin']);
+      requirePermission(session, 'params.edit');
       const body = asObject(req.body);
       return ok(await addAliasAndReconcile(ctx.db, session.userId, id(b), body.silogName, body.terpelName));
     }
   }
 
-  if (a === 'recon-params' && parts.length === 1 && is('GET', '/recon-params')) return ok(await getParams(ctx.db, ctx.config.silog.terpelNit));
+  if (a === 'recon-params' && parts.length === 1 && is('GET', '/recon-params')) {
+    requirePermission(session, 'params.view');
+    return ok(await getParams(ctx.db, ctx.config.silog.terpelNit));
+  }
 
   if (a === 'match-filters' && parts.length === 1 && is('PUT', '/match-filters')) {
-    requireRole(session, ['admin']);
+    requirePermission(session, 'params.edit');
     const body = asObject(req.body);
     if (!Array.isArray(body.filters)) throw new AppError(400, 'INVALID_FIELD', 'Campo inválido: filters');
     return ok({ filters: await saveFilters(ctx.db, session.userId, body.filters as MatchFilterDto[]) });
   }
   if (a === 'recon-settings' && parts.length === 1 && is('PUT', '/recon-settings')) {
-    requireRole(session, ['admin']);
+    requirePermission(session, 'params.edit');
     const body = asObject(req.body);
     return ok(await saveSettings(ctx.db, session.userId, body as unknown as ReconSettingsDto));
   }
   if (a === 'place-aliases') {
-    if (parts.length === 1 && is('GET', '/place-aliases')) return ok({ aliases: await loadAliases(ctx.db) });
+    if (parts.length === 1 && is('GET', '/place-aliases')) {
+      requirePermission(session, 'params.view');
+      return ok({ aliases: await loadAliases(ctx.db) });
+    }
     if (parts.length === 1 && is('POST', '/place-aliases')) {
-      requireRole(session, ['admin']);
+      requirePermission(session, 'params.edit');
       const body = asObject(req.body);
       return ok(await upsertAlias(ctx.db, session.userId, body.silogName, body.terpelName), 201);
     }
     if (parts.length === 2 && is('PUT', '/place-aliases/:id')) {
-      requireRole(session, ['admin']);
+      requirePermission(session, 'params.edit');
       const body = asObject(req.body);
       return ok(await upsertAlias(ctx.db, session.userId, body.silogName, body.terpelName, id(b)));
     }
     if (parts.length === 2 && is('DELETE', '/place-aliases/:id')) {
-      requireRole(session, ['admin']);
+      requirePermission(session, 'params.edit');
       await deleteAlias(ctx.db, session.userId, id(b));
       return ok({ ok: true });
     }

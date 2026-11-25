@@ -5,7 +5,7 @@ import { api } from './api';
 const FILTER_LABEL: Record<string, string> = { driver: 'Conductor (cédula)', plate: 'Placa', route: 'Ruta (origen y destino, con equivalencias)', date: 'Fecha (ventana de días)' };
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : 'Error inesperado');
 
-export function Params() {
+export function Params({ readOnly = false }: { readOnly?: boolean }) {
   const [filters, setFilters] = useState<MatchFilterDto[]>([]);
   const [aliases, setAliases] = useState<PlaceAliasDto[]>([]);
   const [settings, setSettings] = useState<ReconSettingsDto | null>(null);
@@ -34,9 +34,10 @@ export function Params() {
   const patch = (i: number, p: Partial<MatchFilterDto>) => setFilters(filters.map((f, k) => (k === i ? { ...f, ...p } : f)));
 
   return (
-    <>
+    <fieldset disabled={readOnly} style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: '1rem', minWidth: 0 }} data-testid="params-root" data-readonly={readOnly}>
+      {readOnly && <div className="alert info" data-testid="params-readonly">Solo lectura: únicamente un administrador puede editar los parámetros.</div>}
       <section className="card" aria-labelledby="p-filters" data-testid="params-filters">
-        <h2 id="p-filters">Filtros de la cascada (solo administradores)</h2>
+        <h2 id="p-filters">Filtros de la cascada{readOnly ? ' (solo lectura)' : ' (solo administradores)'}</h2>
         <p className="muted">Se aplican en este orden. Excluyente: si deja 0 candidatos no hay coincidencia. Preferente: si dejara 0 se ignora y se deja constancia.</p>
         <div className="table-wrap">
           <table>
@@ -61,7 +62,7 @@ export function Params() {
             </tbody>
           </table>
         </div>
-        <button className="primary" data-testid="save-filters" onClick={() => run(() => api.saveFilters(filters), 'Filtros guardados.')}>Guardar filtros</button>
+        {!readOnly && <button className="primary" data-testid="save-filters" onClick={() => run(() => api.saveFilters(filters), 'Filtros guardados.')}>Guardar filtros</button>}
       </section>
 
       {settings && (
@@ -78,7 +79,7 @@ export function Params() {
                 <option value="reconcile_always">Conciliar siempre</option>
               </select>
             </label>
-            <button className="primary" data-testid="save-settings" onClick={() => run(() => api.saveSettings(settings), 'Parámetros guardados.')}>Guardar</button>
+            {!readOnly && <button className="primary" data-testid="save-settings" onClick={() => run(() => api.saveSettings(settings), 'Parámetros guardados.')}>Guardar</button>}
           </div>
           <ul className="muted" data-testid="zero-mode-help">
             <li><b>No tener en cuenta</b>: si Terpel manda volumen 0 el servicio no se concilia (Datos insuficientes, ZERO_VOLUME_IGNORED); se espera que Terpel corrija y reenvíe.</li>
@@ -120,13 +121,13 @@ export function Params() {
             </tbody>
           </table>
         </div>
-        <form className="row" onSubmit={(e) => { e.preventDefault(); void run(async () => { await api.createAlias(newAlias.silog, newAlias.terpel); setNewAlias({ silog: '', terpel: '' }); }, 'Equivalencia agregada.'); }}>
+        {!readOnly && (<form className="row" onSubmit={(e) => { e.preventDefault(); void run(async () => { await api.createAlias(newAlias.silog, newAlias.terpel); setNewAlias({ silog: '', terpel: '' }); }, 'Equivalencia agregada.'); }}>
           <label>En Silogtran<input value={newAlias.silog} onChange={(e) => setNewAlias({ ...newAlias, silog: e.target.value })} required data-testid="new-alias-silog" /></label>
           <label>En Terpel<input value={newAlias.terpel} onChange={(e) => setNewAlias({ ...newAlias, terpel: e.target.value })} required data-testid="new-alias-terpel" /></label>
           <button type="submit" data-testid="add-alias">Agregar</button>
-        </form>
+        </form>)}
       </section>
       {msg && <div className={`alert ${msg.kind}`} role="status" data-testid="params-msg">{msg.text}</div>}
-    </>
+    </fieldset>
   );
 }

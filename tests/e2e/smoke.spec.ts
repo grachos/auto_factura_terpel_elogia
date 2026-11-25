@@ -113,3 +113,45 @@ test('Fase 2: operador concilia, ve traza, elige candidato; admin edita parámet
   await page.getByTestId('save-filters').click();
   await expect(page.getByTestId('params-msg')).toContainText('Filtros guardados');
 });
+
+test('Incremento 1: admin registra usuario de Silogtran; ingreso con ese usuario y vistas por rol', async ({ page }) => {
+  await loginAs(page, 'admin');
+  await page.getByTestId('nav-users').click();
+  await page.getByTestId('new-user-name').fill('Laura.Fact');
+  await page.getByTestId('new-user-role').selectOption('facturacion');
+  await page.getByTestId('new-user-submit').click();
+  await expect(page.getByTestId('users-table')).toContainText('laura.fact');
+  // cuenta de ajustes: write-only
+  await page.getByTestId('svc-user').fill('cuenta.ajustes');
+  await page.getByTestId('svc-pass').fill('clave-ficticia');
+  await page.getByTestId('svc-save').click();
+  await expect(page.getByTestId('service-adjust-status')).toContainText('Guardada: usuario cuenta.ajustes');
+  await expect(page.getByTestId('service-panel')).not.toContainText('clave-ficticia');
+  await page.getByTestId('logout').click();
+
+  await page.goto('/');
+  await page.getByTestId('login-mode-silog').click();
+  await page.getByTestId('login-email').fill('no.registrado');
+  await page.getByTestId('login-password').fill('demo');
+  await page.getByTestId('login-submit').click();
+  await expect(page.getByTestId('login-error')).toContainText('Usuario o contraseña incorrectos');
+
+  await page.getByTestId('login-email').fill('laura.fact');
+  await page.getByTestId('login-password').fill('demo');
+  await page.getByTestId('login-submit').click();
+  await expect(page.getByTestId('whoami')).toContainText('Facturación');
+  await expect(page.getByTestId('nav-users')).toHaveCount(0);
+  await expect(page.getByTestId('config-panel')).toHaveCount(0);
+  await expect(page.getByTestId('import-button')).toBeEnabled();
+  await page.getByTestId('nav-params').click();
+  await expect(page.getByTestId('params-readonly')).toBeVisible();
+  await expect(page.getByTestId('save-filters')).toHaveCount(0);
+  await expect(page.getByTestId('alias-table')).toContainText('Lizama');
+  await page.getByTestId('logout').click();
+  await expect(page.getByTestId('login-submit')).toBeVisible();
+
+  await loginAs(page, 'viewer');
+  await expect(page.getByTestId('nav-params')).toHaveCount(0);
+  await expect(page.getByTestId('nav-users')).toHaveCount(0);
+  await expect(page.getByTestId('import-button')).toBeDisabled();
+});

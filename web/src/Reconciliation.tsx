@@ -115,8 +115,8 @@ function ResultDetail({ r, canWrite, isAdmin, onResolve, onAlias }: {
 }
 
 export function Reconciliation({ cfg, me }: { cfg: PublicConfigDto; me: MeDto }) {
-  const canWrite = me.role === 'operator' || me.role === 'admin';
-  const isAdmin = me.role === 'admin';
+  const canWrite = me.permissions.includes('recon.run');
+  const isAdmin = me.permissions.includes('params.edit');
   const [range, setRange] = useState(cfg.mailSource === 'mock' ? { from: '2026-01-01', to: '2026-01-31' } : defaultMonth());
   const [runs, setRuns] = useState<ReconRunDto[]>([]);
   const [run, setRun] = useState<ReconRunDto | null>(null);

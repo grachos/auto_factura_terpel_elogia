@@ -350,7 +350,7 @@ describe('API de conciliación', () => {
   beforeAll(async () => {
     ctx = await createContext({ AUTH_MODE: 'demo', PGLITE_MEMORY: '1', DATA_DIR: mkdtempSync(join(tmpdir(), 'af2-')), DEMO_JWT_SECRET: 's-local', SILOG_SOURCE: 'none' });
     tokens = {};
-    for (const [k, e] of [['op', 'operador@demo.local'], ['admin', 'admin@demo.local'], ['viewer', 'lector@demo.local']] as const) {
+    for (const [k, e] of [['op', 'operador@demo.local'], ['admin', 'admin@demo.local'], ['viewer', 'lector@demo.local'], ['fact', 'facturacion@demo.local']] as const) {
       const r = await call('POST', '/api/auth/demo-login', undefined, { email: e, password: 'demo' });
       tokens[k] = (json<{ token: string }>(r)).token;
     }
@@ -384,7 +384,10 @@ describe('API de conciliación', () => {
   it('sin sesión 401; lector no concilia; operador no edita parámetros', async () => {
     expect((await call('GET', '/api/reconciliations')).status).toBe(401);
     expect((await call('POST', '/api/reconciliations', tokens.viewer, { dateFrom: '2026-11-19', dateTo: '2026-11-21' })).status).toBe(403);
-    expect((await call('GET', '/api/recon-params', tokens.viewer)).status).toBe(200);
+    expect((await call('GET', '/api/recon-params', tokens.viewer)).status).toBe(403); // ver parámetros: solo admin y facturación
+    expect((await call('GET', '/api/recon-params', tokens.op)).status).toBe(403);
+    expect((await call('GET', '/api/recon-params', tokens.fact)).status).toBe(200);
+    expect((await call('PUT', '/api/recon-settings', tokens.fact, { windowDays: 5, lookbackDays: 5, terpelNit: '830095213' })).status).toBe(403);
     for (const [m, p, b] of [
       ['PUT', '/api/match-filters', { filters: [] }], ['PUT', '/api/recon-settings', { windowDays: 5, lookbackDays: 5, terpelNit: '830095213' }],
       ['POST', '/api/place-aliases', { silogName: 'A', terpelName: 'B' }], ['DELETE', '/api/place-aliases/00000000-0000-4000-8000-000000000001', undefined],
@@ -436,7 +439,7 @@ describe('API de conciliación', () => {
   });
 
   it('admin edita filtros, alias y ajustes (con auditoría) y se aplican', async () => {
-    const p = json<{ filters: { key: string; position: number; active: boolean; mode: string }[]; aliases: { id: string; silogName: string }[] }>(await call('GET', '/api/recon-params', tokens.op));
+    const p = json<{ filters: { key: string; position: number; active: boolean; mode: string }[]; aliases: { id: string; silogName: string }[] }>(await call('GET', '/api/recon-params', tokens.admin));
     expect(p.aliases.map((a) => a.silogName)).toEqual(expect.arrayContaining(['Lizama', 'Chimitá']));
     const changed = p.filters.map((f) => (f.key === 'plate' ? { ...f, mode: 'exclusive' } : f));
     const put = await call('PUT', '/api/match-filters', tokens.admin, { filters: changed });

@@ -22,6 +22,8 @@ export default defineConfig({
       PORT: String(PORT),
       MAIL_SOURCE: 'mock',
       DEMO_JWT_SECRET: 'secreto-e2e-solo-local',
+      APP_SESSION_SECRET: 'secreto-sesion-e2e-solo-local-0123456789abcdef',
+      ENCRYPTION_KEY: 'c3'.repeat(32),
     },
   },
 });

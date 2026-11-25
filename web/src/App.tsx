@@ -2,11 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { MailConfigDto, MeDto, PublicConfigDto, RunDetailDto, RunDto } from '../../core/types';
 import { api, ApiError } from './api';
-import { hasSession, initAuth, login, logout } from './auth';
+import { hasSession, initAuth, login, loginSilog, logout } from './auth';
+import { Users } from './Users';
 import { Reconciliation } from './Reconciliation';
 import { Params } from './Params';
 
-const ROLE_LABEL: Record<string, string> = { operator: 'Operador', admin: 'Administrador', viewer: 'Lector' };
+const ROLE_LABEL: Record<string, string> = { operator: 'Operador', admin: 'Administrador', viewer: 'Lector', facturacion: 'Facturación' };
 const STATUS_LABEL: Record<string, string> = {
   pending: 'Pendiente', running: 'En curso', paused: 'En pausa', completed: 'Completada', failed: 'Con error',
   ready: 'Listo', imported: 'Importado', duplicate: 'Duplicado', needs_review: 'Por revisar', ignored_sender: 'Remitente ignorado',
@@ -25,13 +26,15 @@ function Login({ cfg, onDone }: { cfg: PublicConfigDto; onDone: () => void }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState<'email' | 'silog'>('email');
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      await login(cfg, email, password);
+      if (mode === 'silog') await loginSilog(email, password);
+      else await login(cfg, email, password);
       onDone();
     } catch (err) {
       setError(errMsg(err));
@@ -57,9 +60,15 @@ function Login({ cfg, onDone }: { cfg: PublicConfigDto; onDone: () => void }) {
             </div>
           </div>
         )}
+        {cfg.silogLogin && (
+          <div className="tabs" role="tablist" aria-label="Forma de ingreso">
+            <button type="button" role="tab" aria-selected={mode === 'email'} onClick={() => { setMode('email'); setEmail(''); setPassword(''); setError(null); }} data-testid="login-mode-email">Correo</button>
+            <button type="button" role="tab" aria-selected={mode === 'silog'} onClick={() => { setMode('silog'); setEmail(''); setPassword(''); setError(null); }} data-testid="login-mode-silog">Usuario de Silogtran</button>
+          </div>
+        )}
         <form onSubmit={submit}>
-          <label>Correo
-            <input data-testid="login-email" type="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} />
+          <label>{mode === 'silog' ? 'Usuario de Silogtran' : 'Correo'}
+            <input data-testid="login-email" type={mode === 'silog' ? 'text' : 'email'} autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} />
           </label>
           <label>Contraseña
             <input data-testid="login-password" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
@@ -124,7 +133,8 @@ export function App() {
 }
 
 function Dashboard({ cfg, me, onLogout }: { cfg: PublicConfigDto; me: MeDto; onLogout: () => void }) {
-  const canWrite = me.role === 'operator' || me.role === 'admin';
+  const has = (p: string): boolean => me.permissions.includes(p);
+  const canWrite = has('import.run');
   const [range, setRange] = useState(defaultRange(cfg));
   const [runs, setRuns] = useState<RunDto[]>([]);
   const [detail, setDetail] = useState<RunDetailDto | null>(null);
@@ -132,7 +142,7 @@ function Dashboard({ cfg, me, onLogout }: { cfg: PublicConfigDto; me: MeDto; onL
   const [driving, setDriving] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: 'info' | 'warn' | 'error'; text: string; resumeId?: string } | null>(null);
   const [tab, setTab] = useState<'results' | 'issues'>('results');
-  const [section, setSection] = useState<'import' | 'recon' | 'params'>('import');
+  const [section, setSection] = useState<'import' | 'recon' | 'params' | 'users'>('import');
   const cancel = useRef(false);
 
   const refreshRuns = useCallback(async () => setRuns((await api.listRuns()).runs), []);
@@ -231,17 +241,19 @@ function Dashboard({ cfg, me, onLogout }: { cfg: PublicConfigDto; me: MeDto; onL
         <h1>AutoFactura Terpel <span className="muted">· autorizaciones y conciliación</span></h1>
         <div className="who">
           <span className="badge" data-testid="mail-source">{cfg.mailSource === 'mock' ? 'Correo simulado (datos ficticios)' : 'Exchange Online'}</span>
-          <span data-testid="whoami">{me.email ?? me.id} · {ROLE_LABEL[me.role]}</span>
+          <span data-testid="whoami">{me.displayName ?? me.email ?? me.silogUser ?? me.id} · {ROLE_LABEL[me.role]}</span>
           <button onClick={onLogout} data-testid="logout">Salir</button>
         </div>
       </header>
       <nav className="main-nav" aria-label="Secciones">
         <button aria-current={section === 'import' ? 'page' : undefined} onClick={() => setSection('import')} data-testid="nav-import">Importar autorizaciones</button>
         <button aria-current={section === 'recon' ? 'page' : undefined} onClick={() => setSection('recon')} data-testid="nav-recon">Conciliación</button>
-        {me.role === 'admin' && <button aria-current={section === 'params' ? 'page' : undefined} onClick={() => setSection('params')} data-testid="nav-params">Parámetros</button>}
+        {has('params.view') && <button aria-current={section === 'params' ? 'page' : undefined} onClick={() => setSection('params')} data-testid="nav-params">Parámetros</button>}
+        {has('users.manage') && <button aria-current={section === 'users' ? 'page' : undefined} onClick={() => setSection('users')} data-testid="nav-users">Usuarios</button>}
       </nav>
       {section === 'recon' && <main><Reconciliation cfg={cfg} me={me} /></main>}
-      {section === 'params' && me.role === 'admin' && <main><Params /></main>}
+      {section === 'params' && has('params.view') && <main><Params readOnly={!has('params.edit')} /></main>}
+      {section === 'users' && has('users.manage') && <main><Users me={me} /></main>}
       <main hidden={section !== 'import'}>
         <section className="card" aria-labelledby="new-import">
           <h2 id="new-import">Nueva importación</h2>
@@ -365,7 +377,7 @@ function Dashboard({ cfg, me, onLogout }: { cfg: PublicConfigDto; me: MeDto; onL
           </div>
         </section>
 
-        {me.role === 'admin' && <ConfigPanel />}
+        {has('mail.config') && <ConfigPanel />}
       </main>
     </>
   );

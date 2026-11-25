@@ -52,6 +52,7 @@ export async function handleNode(ctx: AppContext, req: IncomingMessage, res: Ser
   });
   const headers: Record<string, string | undefined> = {};
   for (const [k, v] of Object.entries(req.headers)) headers[k.toLowerCase()] = Array.isArray(v) ? v.join(',') : v;
+  if (req.socket?.remoteAddress) headers['x-remote-addr'] = req.socket.remoteAddress;
   let body: unknown;
   if (req.method && !['GET', 'HEAD'].includes(req.method)) body = await readBody(req);
   const out = await handleRequest(ctx, { method: req.method ?? 'GET', path: url.pathname, query, headers, body });

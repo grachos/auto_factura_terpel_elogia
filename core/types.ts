@@ -1,5 +1,5 @@
 // Tipos compartidos entre API y UI (solo tipos; sin dependencias).
-export type Role = 'operator' | 'admin' | 'viewer';
+export type Role = 'operator' | 'admin' | 'viewer' | 'facturacion';
 export type RunStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed';
 export type ExportStatus = 'pending' | 'ready' | 'failed';
 export type Outcome = 'imported' | 'duplicate' | 'needs_review' | 'ignored_sender' | 'ignored_subject' | 'parse_error';
@@ -89,6 +89,11 @@ export interface MeDto {
   id: string;
   email: string | null;
   role: Role;
+  /** Permisos efectivos (matriz central en core/permissions.ts). */
+  permissions: string[];
+  displayName: string | null;
+  silogUser: string | null;
+  loginKind: 'supabase' | 'silogtran';
 }
 
 export interface PublicConfigDto {
@@ -98,6 +103,8 @@ export interface PublicConfigDto {
   supabaseAnonKey: string | null;
   demoUsers: { email: string; role: Role }[];
   silogSource: 'api' | 'mock' | 'none';
+  /** El ingreso con usuario de Silogtran está disponible (base URL y APP_SESSION_SECRET configurados). */
+  silogLogin: boolean;
 }
 
 export interface ApiErrorDto {

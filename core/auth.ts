@@ -62,6 +62,7 @@ export const DEMO_USERS: { id: string; email: string; role: Role }[] = [
   { id: '00000000-0000-4000-8000-0000000000a1', email: 'operador@demo.local', role: 'operator' },
   { id: '00000000-0000-4000-8000-0000000000a2', email: 'admin@demo.local', role: 'admin' },
   { id: '00000000-0000-4000-8000-0000000000a3', email: 'lector@demo.local', role: 'viewer' },
+  { id: '00000000-0000-4000-8000-0000000000a4', email: 'facturacion@demo.local', role: 'facturacion' },
 ];
 export const DEMO_PASSWORD = 'demo';
 

@@ -11,6 +11,8 @@ import { GraphMailSource, createMsalTokenProvider } from './mail/graph.js';
 import { MockMailSource } from './mail/mock.js';
 import { MockSilogtranSource, SilogtranApiSource } from './recon/silogtran.js';
 import type { SilogtranSource } from './recon/silogtran.js';
+import { MockSilogAuth, SilogApiAuth } from './silogAuth.js';
+import type { SilogAuthClient } from './silogAuth.js';
 import type { MailSource } from './mail/types.js';
 import { FsStorage } from './storage/fs.js';
 import { DbStorage } from './storage/db.js';
@@ -25,6 +27,8 @@ export interface AppContext {
   auth: AuthVerifier;
   /** Silogtran (solo lectura). null = sin configurar (la API responde SILOG_NOT_CONFIGURED). */
   silog: SilogtranSource | null;
+  /** Validador del login por API de Silogtran (ingreso de personas y prueba de conexión). */
+  silogAuth: SilogAuthClient | null;
 }
 
 export async function ensureMailConfig(db: Db, config: AppConfig): Promise<void> {
@@ -147,5 +151,8 @@ export async function createContext(env: Record<string, string | undefined> = pr
     const { buildDemoSilogRows } = await import('../fixtures/silogtran.js');
     silog = new MockSilogtranSource(buildDemoSilogRows());
   }
-  return { config, db, mail, storage, auth, silog };
+  let silogAuth: SilogAuthClient | null = null;
+  if (sg.baseUrl) silogAuth = new SilogApiAuth(sg.baseUrl);
+  else if (config.authMode === 'demo') silogAuth = new MockSilogAuth({}, 'demo'); // demo: cualquier usuario registrado entra con la clave "demo"
+  return { config, db, mail, storage, auth, silog, silogAuth };
 }

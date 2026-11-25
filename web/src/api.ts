@@ -3,6 +3,14 @@ import type {
   ReconRunDto, ReconSettingsDto, ReconStepDto, RunDetailDto, RunDto, StepResultDto,
 } from '../../core/types';
 
+export interface AppUserDto {
+  id: string; silogUser: string; displayName: string | null; company: string | null; role: string; active: boolean;
+  lastLoginAt: string | null; hasStoredPassword: boolean; credentialUpdatedAt: string | null; lastTestAt: string | null; lastTestOk: boolean | null;
+}
+export interface ServiceCredentialDto {
+  purpose: 'adjust' | 'invoice'; saved: boolean; silogUser: string | null; updatedAt: string | null; lastTestAt: string | null; lastTestOk: boolean | null;
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -55,6 +63,17 @@ export const api = {
   exportUrl: (id: string) => request<{ url: string; expiresInSeconds: number }>('GET', `/api/runs/${id}/export/url`),
   getMailConfig: () => request<MailConfigDto>('GET', '/api/mail-config'),
   saveMailConfig: (c: Omit<MailConfigDto, 'id'>) => request<MailConfigDto>('PUT', '/api/mail-config', c),
+  silogLogin: (usuario: string, clave: string) => request<{ token: string; expiresInSeconds: number }>('POST', '/api/auth/silog-login', { usuario, clave }),
+  logout: () => request<{ ok: true }>('POST', '/api/auth/logout'),
+  listUsers: () => request<{ users: AppUserDto[] }>('GET', '/api/users'),
+  createUser: (silogUser: string, role: string, displayName?: string) => request<AppUserDto>('POST', '/api/users', { silogUser, role, displayName }),
+  updateUser: (id: string, patch: { role?: string; active?: boolean; displayName?: string }) => request<AppUserDto>('PUT', `/api/users/${id}`, patch),
+  saveUserPassword: (id: string, password: string) => request<AppUserDto>('PUT', `/api/users/${id}/credential`, { password }),
+  deleteUserPassword: (id: string) => request<AppUserDto>('DELETE', `/api/users/${id}/credential`),
+  testUserPassword: (id: string) => request<{ ok: boolean; testedAt: string }>('POST', `/api/users/${id}/credential/test`),
+  serviceCredentials: () => request<{ credentials: ServiceCredentialDto[] }>('GET', '/api/service-credentials'),
+  saveServiceCredential: (purpose: string, silogUser: string, password: string) => request<{ credentials: ServiceCredentialDto[] }>('PUT', `/api/service-credentials/${purpose}`, { silogUser, password }),
+  testServiceCredential: (purpose: string) => request<{ ok: boolean; testedAt: string }>('POST', `/api/service-credentials/${purpose}/test`),
   // Fase 2
   listRecon: () => request<{ runs: ReconRunDto[] }>('GET', '/api/reconciliations'),
   createRecon: (dateFrom: string, dateTo: string, sync = true) => request<ReconRunDto>('POST', '/api/reconciliations', { dateFrom, dateTo, sync }),
