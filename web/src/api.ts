@@ -1,4 +1,7 @@
-import type { ApiErrorDto, MailConfigDto, MeDto, PublicConfigDto, RunDetailDto, RunDto, StepResultDto } from '../../core/types';
+import type {
+  ApiErrorDto, MailConfigDto, MatchFilterDto, MeDto, PlaceAliasDto, PublicConfigDto, ReconParamsDto, ReconResultDto, ReconRunDetailDto,
+  ReconRunDto, ReconSettingsDto, ReconStepDto, RunDetailDto, RunDto, StepResultDto,
+} from '../../core/types';
 
 export class ApiError extends Error {
   constructor(
@@ -52,4 +55,19 @@ export const api = {
   exportUrl: (id: string) => request<{ url: string; expiresInSeconds: number }>('GET', `/api/runs/${id}/export/url`),
   getMailConfig: () => request<MailConfigDto>('GET', '/api/mail-config'),
   saveMailConfig: (c: Omit<MailConfigDto, 'id'>) => request<MailConfigDto>('PUT', '/api/mail-config', c),
+  // Fase 2
+  listRecon: () => request<{ runs: ReconRunDto[] }>('GET', '/api/reconciliations'),
+  createRecon: (dateFrom: string, dateTo: string, sync = true) => request<ReconRunDto>('POST', '/api/reconciliations', { dateFrom, dateTo, sync }),
+  stepRecon: (id: string) => request<ReconStepDto>('POST', `/api/reconciliations/${id}/step`),
+  reconDetail: (id: string) => request<ReconRunDetailDto>('GET', `/api/reconciliations/${id}`),
+  reconExportUrl: (id: string) => request<{ url: string }>('GET', `/api/reconciliations/${id}/export/url`),
+  reconRegenerate: (id: string) => request<{ status: 'ready' | 'failed' }>('POST', `/api/reconciliations/${id}/export`),
+  resolveResult: (id: string, recordId: string) => request<ReconResultDto>('POST', `/api/reconciliation-results/${id}/resolve`, { recordId }),
+  addAlias: (id: string, silogName: string, terpelName: string) => request<ReconResultDto>('POST', `/api/reconciliation-results/${id}/alias`, { silogName, terpelName }),
+  reconParams: () => request<ReconParamsDto>('GET', '/api/recon-params'),
+  saveFilters: (filters: MatchFilterDto[]) => request<{ filters: MatchFilterDto[] }>('PUT', '/api/match-filters', { filters }),
+  saveSettings: (s: ReconSettingsDto) => request<ReconSettingsDto>('PUT', '/api/recon-settings', s),
+  createAlias: (silogName: string, terpelName: string) => request<PlaceAliasDto>('POST', '/api/place-aliases', { silogName, terpelName }),
+  updateAlias: (id: string, silogName: string, terpelName: string) => request<PlaceAliasDto>('PUT', `/api/place-aliases/${id}`, { silogName, terpelName }),
+  deleteAlias: (id: string) => request<{ ok: true }>('DELETE', `/api/place-aliases/${id}`),
 };

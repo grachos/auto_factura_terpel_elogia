@@ -69,3 +69,47 @@ test('lector no puede importar y administrador ve la configuración', async ({ p
   await loginAs(page, 'admin');
   await expect(page.getByTestId('config-panel')).toBeVisible();
 });
+
+test('Fase 2: operador concilia, ve traza, elige candidato; admin edita parámetros; Excel descargable', async ({ page }) => {
+  await loginAs(page, 'operator');
+  await expect(page.getByTestId('nav-params')).toHaveCount(0);
+  await page.getByTestId('import-button').click();
+  await expect(page.getByTestId('run-status')).toContainText('Completada', { timeout: 30_000 });
+
+  await page.getByTestId('nav-recon').click();
+  await page.getByTestId('recon-from').fill('2026-01-01');
+  await page.getByTestId('recon-to').fill('2026-01-31');
+  await page.getByTestId('recon-button').click();
+  await expect(page.getByTestId('recon-status')).toContainText('Completada', { timeout: 30_000 });
+  await expect(page.getByTestId('recon-total')).toHaveText('10');
+  await expect(page.getByTestId('recon-amb')).toHaveText('1');
+  await expect(page.getByTestId('recon-exact')).not.toHaveText('0');
+
+  const row = page.locator('[data-testid=recon-row][data-transport="000125"]');
+  await expect(row).toContainText('Ambiguo');
+  await row.click();
+  await expect(page.getByTestId('trace-table')).toBeVisible();
+  await page.getByTestId('pick-candidate').first().click();
+  await expect(page.getByTestId('recon-notice')).toContainText('Candidato elegido');
+  await expect(row).toContainText('manual');
+
+  await page.getByTestId('recon-review').check();
+  await expect(page.getByTestId('recon-table').locator('[data-testid=recon-row]').first()).toBeVisible();
+
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('recon-download').click()]);
+  expect(download.suggestedFilename()).toMatch(/^conciliacion-.*\.xlsx$/);
+  await page.getByTestId('logout').click();
+
+  await loginAs(page, 'admin');
+  await page.getByTestId('nav-params').click();
+  await expect(page.getByTestId('alias-table')).toContainText('Lizama');
+  await page.getByTestId('new-alias-silog').fill('Sitio Demo');
+  await page.getByTestId('new-alias-terpel').fill('Lugar Demo');
+  await page.getByTestId('add-alias').click();
+  await expect(page.getByTestId('alias-table')).toContainText('Sitio Demo');
+  await page.getByTestId('set-window').fill('7');
+  await page.getByTestId('save-settings').click();
+  await expect(page.getByTestId('params-msg')).toContainText('guardados');
+  await page.getByTestId('save-filters').click();
+  await expect(page.getByTestId('params-msg')).toContainText('Filtros guardados');
+});

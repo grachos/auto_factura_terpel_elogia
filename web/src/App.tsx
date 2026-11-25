@@ -3,6 +3,8 @@ import type { FormEvent } from 'react';
 import type { MailConfigDto, MeDto, PublicConfigDto, RunDetailDto, RunDto } from '../../core/types';
 import { api, ApiError } from './api';
 import { hasSession, initAuth, login, logout } from './auth';
+import { Reconciliation } from './Reconciliation';
+import { Params } from './Params';
 
 const ROLE_LABEL: Record<string, string> = { operator: 'Operador', admin: 'Administrador', viewer: 'Lector' };
 const STATUS_LABEL: Record<string, string> = {
@@ -130,6 +132,7 @@ function Dashboard({ cfg, me, onLogout }: { cfg: PublicConfigDto; me: MeDto; onL
   const [driving, setDriving] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: 'info' | 'warn' | 'error'; text: string; resumeId?: string } | null>(null);
   const [tab, setTab] = useState<'results' | 'issues'>('results');
+  const [section, setSection] = useState<'import' | 'recon' | 'params'>('import');
   const cancel = useRef(false);
 
   const refreshRuns = useCallback(async () => setRuns((await api.listRuns()).runs), []);
@@ -225,14 +228,21 @@ function Dashboard({ cfg, me, onLogout }: { cfg: PublicConfigDto; me: MeDto; onL
   return (
     <>
       <header className="top">
-        <h1>AutoFactura Terpel <span className="muted">· Fase 1: importar autorizaciones</span></h1>
+        <h1>AutoFactura Terpel <span className="muted">· autorizaciones y conciliación</span></h1>
         <div className="who">
           <span className="badge" data-testid="mail-source">{cfg.mailSource === 'mock' ? 'Correo simulado (datos ficticios)' : 'Exchange Online'}</span>
           <span data-testid="whoami">{me.email ?? me.id} · {ROLE_LABEL[me.role]}</span>
           <button onClick={onLogout} data-testid="logout">Salir</button>
         </div>
       </header>
-      <main>
+      <nav className="main-nav" aria-label="Secciones">
+        <button aria-current={section === 'import' ? 'page' : undefined} onClick={() => setSection('import')} data-testid="nav-import">Importar autorizaciones</button>
+        <button aria-current={section === 'recon' ? 'page' : undefined} onClick={() => setSection('recon')} data-testid="nav-recon">Conciliación</button>
+        {me.role === 'admin' && <button aria-current={section === 'params' ? 'page' : undefined} onClick={() => setSection('params')} data-testid="nav-params">Parámetros</button>}
+      </nav>
+      {section === 'recon' && <main><Reconciliation cfg={cfg} me={me} /></main>}
+      {section === 'params' && me.role === 'admin' && <main><Params /></main>}
+      <main hidden={section !== 'import'}>
         <section className="card" aria-labelledby="new-import">
           <h2 id="new-import">Nueva importación</h2>
           <p className="muted">Rango en hora de Bogotá, ambos días incluidos.</p>
