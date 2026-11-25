@@ -121,8 +121,8 @@ describe('parser de la plantilla', () => {
     expect(p.plateNormalized).toBe('ABC123');
     expect(p.transportVolumeRaw).toBe('9973,0000');
     expect(p.transportVolume).toBe('9973.0000');
-    expect(p.transportVolumeUnit).toBeNull();
-    expect(p.unitStatus).toBe('pending_confirmation');
+    expect(p.transportVolumeUnit).toBe('galones');
+    expect(p.unitStatus).toBe('confirmed');
     expect(p.rate).toBe('123.4500');
     expect(p.driverCode).toBe('D-0001');
     expect(p.parserVersion).toMatch(/^\d+\.\d+\.\d+$/);
@@ -171,11 +171,10 @@ describe('parser de la plantilla', () => {
     expect(p.issues.some((i) => i.code === 'AMBIGUOUS_DECIMAL')).toBe(true);
     expect(p.parseStatus).toBe('incomplete');
   });
-  it('planta 9P solo marca', () => {
+  it('la planta de cargue no se evalúa: ni obligatoria ni genera reglas', () => {
     const p = parseAuthorization({ contentType: 'html', content: htmlTableBody(baseFields({ plant: '9P - Planta X' })) });
-    expect(p.loadingPlantFlag).toBe('9P');
-    const q = parseAuthorization({ contentType: 'html', content: htmlTableBody(baseFields({ plant: '19P2' })) });
-    expect(q.loadingPlantFlag).toBeNull();
+    expect(p.parseStatus).toBe('ok');
+    expect(p).not.toHaveProperty('loadingPlantFlag');
   });
   it('sin bloque de plantilla → error', () => {
     const p = parseAuthorization({ contentType: 'html', content: '<p>hola</p>' });
@@ -211,7 +210,8 @@ describe('plantilla real: reenvío interno y variantes de formato', () => {
       expect(p.route).toBe('C00000-CIUDAD UNO - CIUDAD DOS');
       expect(p.transportVolumeRaw).toBe('9973,0000');
       expect(p.transportVolume).toBe('9973.0000');
-      expect(p.transportVolumeUnit).toBeNull();
+      expect(p.transportVolumeUnit).toBe('galones');
+      expect(p.unitStatus).toBe('confirmed');
       expect(p.remissionNumber).toBeNull();
       expect(p.rawFields.remission_number).toBe(''); // etiqueta presente y vacía
       expect(p.loadingPlant).toBeNull();
@@ -224,9 +224,13 @@ describe('plantilla real: reenvío interno y variantes de formato', () => {
     const { realFormatBody } = await import('../fixtures/realFormat.js');
     const zero = parseAuthorization({ contentType: 'text', content: realFormatBody({ transport: '6000000002', volume: '0,0000' }) });
     expect(zero.transportVolume).toBe('0.0000');
+    expect(zero.transportVolumeUnit).toBe('galones'); // el cero es un valor válido, en galones
+    expect(zero.parseStatus).toBe('ok');
     const empty = parseAuthorization({ contentType: 'text', content: realFormatBody({ transport: '6000000003', volume: '' }) });
     expect(empty.transportVolume).toBeNull();
     expect(empty.rawFields.transport_volume).toBe('');
+    expect(empty.transportVolumeUnit).toBeNull();
+    expect(empty.unitStatus).toBe('not_applicable');
   });
 
   it('confianza del remitente: directo, reenvío interno verificado y casos rechazados', async () => {

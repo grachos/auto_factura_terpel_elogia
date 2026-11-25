@@ -38,7 +38,6 @@ export const SERVICE_COLUMNS: Col[] = [
   { key: 'expense_number', header: 'Número de gasto', type: 'text', width: 16, value: (r) => r.expense_number },
   { key: 'service_date', header: 'Fecha del servicio', type: 'date', width: 14, value: (r) => r.service_date },
   { key: 'loading_plant', header: 'Planta de cargue', type: 'text', width: 24, value: (r) => r.loading_plant },
-  { key: 'loading_plant_flag', header: 'Marca planta', type: 'text', width: 10, value: (r) => r.loading_plant_flag },
   { key: 'purchase_doc', header: 'Documento de compras o contrato', type: 'text', width: 22, value: (r) => r.purchase_doc },
   { key: 'service_entry_sheet', header: 'Hoja de entrada de servicio', type: 'text', width: 22, value: (r) => r.service_entry_sheet },
   { key: 'net_value', header: 'Valor neto', type: 'dec4', width: 18, value: (r) => r.net_value },

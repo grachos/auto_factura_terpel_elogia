@@ -285,7 +285,7 @@ function Dashboard({ cfg, me, onLogout }: { cfg: PublicConfigDto; me: MeDto; onL
                 {tab === 'results' ? (
                   <div className="table-wrap">
                     <table data-testid="results-table">
-                      <thead><tr><th>Clave</th><th>Resultado</th><th>Versión</th><th>Fecha servicio</th><th>Placa</th><th>Valor neto</th><th>Volumen (original → número)</th><th>Planta</th><th>Incid.</th></tr></thead>
+                      <thead><tr><th>Clave</th><th>Resultado</th><th>Versión</th><th>Fecha servicio</th><th>Placa</th><th>Valor neto</th><th>Volumen (original → número)</th><th>Incid.</th></tr></thead>
                       <tbody>
                         {detail.results.map((r) => (
                           <tr key={r.businessKey}>
@@ -295,8 +295,7 @@ function Dashboard({ cfg, me, onLogout }: { cfg: PublicConfigDto; me: MeDto; onL
                             <td>{r.serviceDate ?? '—'}</td>
                             <td>{r.plate ?? '—'}</td>
                             <td className="mono">{r.netValue ? `${Number(r.netValue).toLocaleString('es-CO', { minimumFractionDigits: 2 })} ${r.currency ?? ''}` : '—'}</td>
-                            <td className="mono">{r.transportVolumeRaw === null ? '—' : r.transportVolumeRaw === '' ? '(vacío)' : r.transportVolumeRaw} → {r.transportVolume ?? '—'} <span className="muted">unidad pendiente</span></td>
-                            <td>{r.loadingPlantFlag ?? '—'}</td>
+                            <td className="mono">{r.transportVolumeRaw === null ? '—' : r.transportVolumeRaw === '' ? '(vacío)' : r.transportVolumeRaw} → {r.transportVolume ?? '—'} {r.transportVolume !== null && <span className="muted">galones</span>}</td>
                             <td>{r.issueCount}</td>
                           </tr>
                         ))}

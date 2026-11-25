@@ -78,7 +78,6 @@ export interface BatchRow {
   expense_number: string | null;
   service_date: string | null;
   loading_plant: string | null;
-  loading_plant_flag: string | null;
   purchase_doc: string | null;
   service_entry_sheet: string | null;
   net_value: string | null;
@@ -117,7 +116,7 @@ export async function getBatchRows(q: Queryable, runId: string): Promise<BatchRo
      select s.business_key, s.transport_number, s.version_count, a.version, b.outcome,
             a.parse_status, a.template_variant, a.parser_version,
             a.remission_number, a.expense_number, a.service_date::text as service_date,
-            a.loading_plant, a.loading_plant_flag, a.purchase_doc, a.service_entry_sheet,
+            a.loading_plant, a.purchase_doc, a.service_entry_sheet,
             a.net_value::text as net_value, a.net_value_raw, a.currency, a.plate, a.plate_normalized, a.route,
             a.transport_volume::text as transport_volume, a.transport_volume_raw, a.transport_volume_unit, a.unit_status,
             a.rate::text as rate, a.rate_raw, a.driver_code, a.driver_name, m.received_at,
@@ -197,7 +196,6 @@ export async function getRunDetail(q: Queryable, runId: string): Promise<RunDeta
     currency: r.currency,
     transportVolumeRaw: r.transport_volume_raw,
     transportVolume: r.transport_volume,
-    loadingPlantFlag: r.loading_plant_flag,
     issueCount: r.issue_count,
   }));
   return {

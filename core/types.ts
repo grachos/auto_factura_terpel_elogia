@@ -45,7 +45,6 @@ export interface ResultRowDto {
   currency: string | null;
   transportVolumeRaw: string | null;
   transportVolume: string | null;
-  loadingPlantFlag: string | null;
   issueCount: number;
 }
 

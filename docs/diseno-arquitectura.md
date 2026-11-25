@@ -43,9 +43,9 @@ Identidades:
 
 Vacío vs cero: `raw = NULL` etiqueta ausente; `raw = ''` presente vacía → normalizado NULL; `'0'` → 0. Etiqueta ausente o campo obligatorio vacío → incidencia.
 
-Volumen: `transport_volume_raw`, `transport_volume` numérico, `transport_volume_unit = NULL`, `unit_status = 'pending_confirmation'`. Sin conversión.
+Volumen: `transport_volume_raw`, `transport_volume` numérico, unidad `galones` y `unit_status = 'confirmed'` (confirmado por el negocio; puede venir en 0). Sin conversión.
 
-Planta 9P: solo marca `loading_plant_flag = '9P'`; sin regla de cliente en Fase 1.
+Planta de cargue: se guarda tal cual; el negocio indicó no tenerla en cuenta (sin marca 9P ni reglas).
 
 Fecha del servicio: formato `DD.MM.AAAA`, campo independiente de la fecha de recepción.
 

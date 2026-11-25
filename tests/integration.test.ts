@@ -95,10 +95,10 @@ describe('importación de punta a punta (PGlite + migraciones SQL reales)', () =
 
   it('criterios 4 y 5: ceros a la izquierda, volumen crudo/numérico, unidad pendiente, vacío ≠ 0', async () => {
     const a = (await db.query<Record<string, string | null>>(
-      `select a.transport_number, transport_volume_raw, transport_volume::text as v, transport_volume_unit, unit_status, loading_plant_flag
+      `select a.transport_number, transport_volume_raw, transport_volume::text as v, transport_volume_unit, unit_status
          from authorizations a join services s on s.id = a.service_id where s.business_key = '000124' and a.version = 1`,
     )).rows[0];
-    expect(a).toMatchObject({ transport_number: '000124', transport_volume_raw: '9973,0000', v: '9973.0000', transport_volume_unit: null, unit_status: 'pending_confirmation', loading_plant_flag: '9P' });
+    expect(a).toMatchObject({ transport_number: '000124', transport_volume_raw: '9973,0000', v: '9973.0000', transport_volume_unit: 'galones', unit_status: 'confirmed' });
     const zero = (await db.query<Record<string, string | null>>(
       `select transport_volume_raw, transport_volume::text as v from authorizations a join services s on s.id = a.service_id where s.business_key = '007890'`,
     )).rows[0];

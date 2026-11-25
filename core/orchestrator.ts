@@ -392,16 +392,16 @@ async function insertAuthorization(
     `insert into authorizations
        (message_id, service_id, version, parse_status, parser_version, template_variant,
         transport_number, remission_number, expense_number, service_date, service_date_raw,
-        loading_plant, loading_plant_flag, purchase_doc, service_entry_sheet,
+        loading_plant, purchase_doc, service_entry_sheet,
         net_value, net_value_raw, currency, plate, plate_normalized, route,
         transport_volume, transport_volume_raw, transport_volume_unit, unit_status,
         rate, rate_raw, driver_code, driver_name, raw_fields)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30::jsonb)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29::jsonb)
      returning id`,
     [
       messageId, serviceId, version, status, p.parserVersion, p.templateVariant,
       p.transportNumber, p.remissionNumber, p.expenseNumber, p.serviceDate, p.serviceDateRaw,
-      p.loadingPlant, p.loadingPlantFlag, p.purchaseDoc, p.serviceEntrySheet,
+      p.loadingPlant, p.purchaseDoc, p.serviceEntrySheet,
       p.netValue, p.netValueRaw, p.currency, p.plate, p.plateNormalized, p.route,
       p.transportVolume, p.transportVolumeRaw, p.transportVolumeUnit, p.unitStatus,
       p.rate, p.rateRaw, p.driverCode, p.driverName, JSON.stringify(p.rawFields),

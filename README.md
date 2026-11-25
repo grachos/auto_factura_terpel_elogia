@@ -168,8 +168,8 @@ Ver [`.env.example`](.env.example) (sin valores reales). Las principales: `AUTH_
 - **Identidad**: mensaje único por `(buzón, id inmutable)` y por `(buzón, Message-ID)`. Servicio: `business_key` = número de transporte (texto; conserva ceros a la izquierda). Una corrección o reenvío crea una **nueva versión del mismo servicio**; si cambian valores → incidencia `CORRECTED_AUTHORIZATION` (revisión obligatoria); si es idéntico → `RESENT_AUTHORIZATION` (informativa). Versión vigente: la recibida más reciente.
 - **Decimales**: `9973,0000` → `9973.0000`; `1.234.567,89` → `1234567.89`; solo `,` es decimal; `1.234` es ambiguo → incidencia `AMBIGUOUS_DECIMAL`, no se adivina. Nunca float al persistir.
 - **Vacío ≠ cero**: etiqueta ausente → `NULL` (+ incidencia); etiqueta presente vacía → texto `''` y valor `NULL` (+ incidencia si es obligatoria); `0` → `0`.
-- **Volumen**: se guardan el texto original y el valor numérico; `transport_volume_unit = NULL` y `unit_status = 'pending_confirmation'`. **Sin conversión de unidades.**
-- **Planta 9P**: solo marca `loading_plant_flag = '9P'`; sin regla de cliente en esta fase.
+- **Volumen**: se guardan el texto original y el valor numérico, con unidad **galones** (confirmada por el negocio; `unit_status = 'confirmed'`). Puede venir en 0: es un valor válido, distinto de vacío. Sin conversión de unidades.
+- **Planta de cargue**: se guarda el texto tal cual, pero no se evalúa ni genera reglas (decisión del negocio).
 - **Campos obligatorios** (incidencia si faltan o vienen vacíos): número de transporte, fecha del servicio (`DD.MM.AAAA`), valor neto y moneda, placa y volumen.
 - **Excel**: hoja *Servicios* (una fila por servicio del lote, con su versión vigente; identificadores como texto, decimales numéricos con 4 cifras, volumen también como texto original), *Incidencias* y *Resumen* (metadatos, contadores y huella sha256 del contenido; la huella del archivo completo queda en `export_files.sha256`). El lote incluye los servicios de mensajes importados **y** duplicados del rango, así que repetir una ejecución produce los mismos servicios y valores; en cambio la columna "Resultado en la ejecución", el conteo de incidencias, la hoja *Incidencias* y los contadores del *Resumen* reflejan **solo esa ejecución** (en la segunda todo figura como duplicado y sin incidencias).
 
@@ -193,7 +193,7 @@ Ver [`.env.example`](.env.example) (sin valores reales). Las principales: `AUTH_
 |---|---|
 | **Buzón real / Exchange Online** | No probado: faltan credenciales y la autorización de TI. `GraphMailSource` y la autenticación MSAL con certificado/secreto solo se probaron contra un Graph simulado (y `graph:check` sin credenciales). |
 | **Muestra real de la plantilla** | La plantilla es **sintética**. Etiquetas, estructura HTML y variantes reales deben validarse con una muestra anonimizada; hasta entonces el parser puede marcar incidencias. |
-| **Unidad del volumen** | Desconocida: se guarda sin unidad (`pending_confirmation`) y sin conversión. |
+| **Volumen en 0** | Ocurre con frecuencia. En la Fase 2 no debe compararse el volumen cuando venga en 0. |
 | **Clave de negocio** | Provisional (número de transporte); confirmar con negocio si debe incluir el número de gasto (`BUSINESS_KEY_STRATEGY=transport_expense`). |
 | **Informe Silogtran y su documentación** | No disponible; es insumo de la Fase 2 (no implementada). |
 | **Supabase real** | Las migraciones se verificaron en PGlite (PostgreSQL embebido), no en un proyecto Supabase ni con Supabase CLI/Docker (no disponible en el entorno de desarrollo). Pendientes: `supabase db push`, el adaptador `SupabaseStorage` (subida y URL firmada), la verificación de JWT con tokens reales/JWKS y el adaptador `pg` contra un servidor real. |

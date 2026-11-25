@@ -3,7 +3,9 @@ import type { Node as HtmlNode } from 'node-html-parser';
 import { parseServiceDate } from './dates.js';
 import { normalizeDecimal } from './decimal.js';
 
-export const PARSER_VERSION = '1.1.0';
+export const PARSER_VERSION = '1.2.0';
+/** Unidad del volumen del transporte, confirmada por el negocio. Puede venir en 0. */
+export const VOLUME_UNIT = 'galones';
 export const BLOCK_MARKER = 'esta es la informacion del servicio';
 
 export type FieldKey =
@@ -70,7 +72,6 @@ export interface ParsedAuthorization {
   serviceDate: string | null;
   serviceDateRaw: string | null;
   loadingPlant: string | null;
-  loadingPlantFlag: string | null;
   purchaseDoc: string | null;
   serviceEntrySheet: string | null;
   netValue: string | null;
@@ -82,7 +83,7 @@ export interface ParsedAuthorization {
   transportVolume: string | null;
   transportVolumeRaw: string | null;
   transportVolumeUnit: string | null;
-  unitStatus: 'pending_confirmation';
+  unitStatus: 'confirmed' | 'not_applicable';
   rate: string | null;
   rateRaw: string | null;
   driverCode: string | null;
@@ -264,7 +265,6 @@ export function parseAuthorization(input: ParseInput): ParsedAuthorization {
     serviceDate: null,
     serviceDateRaw: null,
     loadingPlant: null,
-    loadingPlantFlag: null,
     purchaseDoc: null,
     serviceEntrySheet: null,
     netValue: null,
@@ -276,7 +276,7 @@ export function parseAuthorization(input: ParseInput): ParsedAuthorization {
     transportVolume: null,
     transportVolumeRaw: null,
     transportVolumeUnit: null,
-    unitStatus: 'pending_confirmation',
+    unitStatus: 'not_applicable',
     rate: null,
     rateRaw: null,
     driverCode: null,
@@ -316,7 +316,6 @@ export function parseAuthorization(input: ParseInput): ParsedAuthorization {
   base.remissionNumber = nz(raw.remission_number);
   base.expenseNumber = nz(raw.expense_number);
   base.loadingPlant = nz(raw.loading_plant);
-  base.loadingPlantFlag = base.loadingPlant && /(^|[^A-Za-z0-9])9P([^A-Za-z0-9]|$)/i.test(base.loadingPlant) ? '9P' : null;
   base.purchaseDoc = nz(raw.purchase_doc);
   base.serviceEntrySheet = nz(raw.service_entry_sheet);
   base.route = nz(raw.route);
@@ -354,6 +353,10 @@ export function parseAuthorization(input: ParseInput): ParsedAuthorization {
   }
   base.transportVolumeRaw = raw.transport_volume;
   base.transportVolume = decimalField('transport_volume', raw.transport_volume);
+  if (base.transportVolume !== null) {
+    base.transportVolumeUnit = VOLUME_UNIT;
+    base.unitStatus = 'confirmed';
+  }
   base.rateRaw = raw.rate;
   base.rate = decimalField('rate', raw.rate);
 

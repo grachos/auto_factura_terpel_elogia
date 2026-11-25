@@ -108,7 +108,6 @@ describe('API (despachador común Fastify/Vercel)', () => {
     expect(detail.issues.length).toBeGreaterThan(0);
     expect(detail.exports[0]?.status).toBe('ready');
     expect(detail.results.find((r) => r.businessKey === '000123')?.transportNumber).toBe('000123');
-    expect(detail.results.find((r) => r.businessKey === '000124')?.loadingPlantFlag).toBe('9P');
     // el DTO no expone cuerpos de correo
     expect(JSON.stringify(detail)).not.toContain('Cordial saludo');
 
