@@ -119,7 +119,7 @@ export function Invoices({ me }: { me: MeDto }) {
           <p><b data-testid="invoice-count">{picked.length}</b> de {todo.length} marcadas · flete total esperado <b data-testid="invoice-total">{money(String(total))}</b> · {plan.excluded.length} excluida(s){plan.unplanned ? ` · ${plan.unplanned} elegible(s) nueva(s) sin planificar: pulse «Generar plan de facturación»` : ''}</p>
           <div className="table-wrap">
             <table data-testid="invoice-table">
-              <thead><tr><th></th><th>Transporte</th><th>Remesa</th><th>Placa</th><th>Fecha</th><th>Valor Terpel</th><th>Flete esperado</th><th>Estado</th><th></th></tr></thead>
+              <thead><tr><th><input type="checkbox" aria-label="Marcar o desmarcar todas las remesas" checked={todo.length > 0 && picked.length === todo.length} ref={(el) => { if (el) el.indeterminate = picked.length > 0 && picked.length < todo.length; }} onChange={(ev) => setChecked(ev.target.checked ? new Set(todo.map((e) => e.id)) : new Set())} disabled={todo.length === 0} data-testid="invoice-check-all" /></th><th>Transporte</th><th>Remesa</th><th>Placa</th><th>Fecha</th><th>Valor Terpel</th><th>Flete esperado</th><th>Estado</th><th></th></tr></thead>
               <tbody>
                 {plan.eligible.map((e) => {
                   const actionable = ['eligible', 'rehearsed', 'failed', 'skipped'].includes(e.status);
