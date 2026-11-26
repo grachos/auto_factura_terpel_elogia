@@ -102,7 +102,7 @@ export function Adjustments({ cfg: _cfg, me, writer, onWriter }: { cfg: PublicCo
       <section className="card" aria-labelledby="adj-title" data-testid="adj-panel">
         <h2 id="adj-title">Ajustes de tarifa</h2>
         <p className="muted">
-          Los valores actuales se leen de la consulta de la remesa en Silogtran (el informe no refleja el peso ni la cantidad). Para cada servicio con diferencias se calcula la nueva tarifa (valor de Terpel ÷ galones, decimal exacto de hasta 12 caracteres con punto). Si no es exacta, queda en revisión y no se puede aprobar.
+          Solo se proponen ajustes para servicios con diferencias en la conciliación: el total de la remesa no coincide con el valor de Terpel (si el total ya es igual, el servicio es exacto y no se propone nada). Los valores actuales se leen de la consulta de la remesa en Silogtran (el informe no trae el peso cumplido). Para cada servicio con diferencias se calcula la nueva tarifa (valor de Terpel ÷ galones, decimal exacto de hasta 12 caracteres con punto). Si no es exacta, queda en revisión y no se puede aprobar.
         </p>
         <div className="row">
           <label>Conciliación

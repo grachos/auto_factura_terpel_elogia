@@ -354,7 +354,7 @@ describe('aplicar con escritor real (servicio, API, lista de permitidas, ensayo,
       `insert into authorizations (message_id, service_id, version, parse_status, parser_version, transport_number, expense_number, service_date, route, plate_normalized, transport_volume, net_value, driver_code)
        values ($1,$2,1,'ok','t','6008602767','4500000001','2026-11-17','C1-AAA - BBB','PLA001',10487,2464445,'0000000011') returning id`, [msg.rows[0]?.id, svc.rows[0]?.id]);
     await db.query('update services set current_authorization_id=$2 where id=$1', [svc.rows[0]?.id, au.rows[0]?.id]);
-    rows = [silogRow({ cliente_nit: TERPEL_NIT, manifiesto: 'M1', remesa_codigo: REMESA, fecha: '2026-11-15', conductor_documento: '11', placa: 'PLA001', ciudad_origen_remesa: 'AAA', ciudad_destino_remesa: 'BBB', remesa_peso: 10460, total_remesa: '2464445' })];
+    rows = [silogRow({ cliente_nit: TERPEL_NIT, manifiesto: 'M1', remesa_codigo: REMESA, fecha: '2026-11-15', conductor_documento: '11', placa: 'PLA001', ciudad_origen_remesa: 'AAA', ciudad_destino_remesa: 'BBB', remesa_peso: 10460, total_remesa: '2460000' })];
     // El informe de Silogtran NO refleja el peso/cantidad que cambia este ajuste: nunca se modifica en las pruebas.
     ctx.silog = new MockSilogtranSource(rows);
     const c = await call('POST', '/api/reconciliations', tok.fact, { dateFrom: '2026-11-17', dateTo: '2026-11-17' });

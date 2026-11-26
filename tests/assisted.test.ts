@@ -75,7 +75,7 @@ describe('modo asistido de ajustes', () => {
     await seedService({ t: 'T-NM', date: '2026-11-21', driver: '0000000019', vol: 100, value: 100 });
     await seedService({ t: 'T-Z', date: '2026-11-21', driver: '0000000020', vol: 0, value: 500 });
     ctx.silog = new MockSilogtranSource([
-      sRow(1, '11', '2026-11-15', 10460, '2464445'), sRow(2, '12', '2026-11-16', 10122, '6694492'), sRow(3, '13', '2026-11-17', 9979, '2735616'),
+      sRow(1, '11', '2026-11-15', 10460, '2460000'), sRow(2, '12', '2026-11-16', 10122, '6690000'), sRow(3, '13', '2026-11-17', 9979, '2735616'),
       sRow(4, '14', '2026-11-17', 3990, '900000'), sRow(5, '16', '2026-11-18', 2990, '2700000'),
       // ya ajustado: peso, cantidad y tarifa (rate) ya son los esperados (5000 y 200)
       sRow(6, '17', '2026-11-18', 5000, '999999', '200'),

@@ -377,6 +377,16 @@ export async function generateProposals(deps: AdjustDeps, runId: string, actor: 
       sum.created += 1;
     });
   }
+  // Propuestas vivas de servicios que YA NO están en MATCH_WITH_DIFFERENCES (p. ej. el total ya coincide con Terpel): quedan obsoletas.
+  const keep = new Set(rows.rows.map((r) => r.service_id));
+  const live = await db.query<{ id: string; status: ProposalStatus; service_id: string }>(
+    `select id, status, service_id from adjustment_proposals where kind = 'adjust' and service_date between $1 and $2 and status in ('proposed','needs_review','approved')`, [rr.from, rr.to],
+  );
+  for (const o of live.rows) {
+    if (keep.has(o.service_id)) continue;
+    const moved = await move(db, o.id, [o.status], 'stale', actor, 'superseded', { last_error: 'La conciliación ya no muestra diferencias para este servicio (el total de Silogtran coincide con el valor de Terpel)' }, { reason: 'sin diferencias en la conciliación vigente' });
+    if (moved) sum.staled += 1;
+  }
   await audit(db, actor, 'adjustment.generate', 'reconciliation_run', runId, { ...sum });
   log('adjust.generate', { runId, created: sum.created, needsReview: sum.needsReview });
   return sum;

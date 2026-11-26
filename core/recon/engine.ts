@@ -1,6 +1,6 @@
 import { daysBetween, normalizeDocument, normalizePlace, parseTerpelRoute, sameNumber, toNumber } from './normalize.js';
 
-export const RULES_VERSION = 'recon-1.2.0';
+export const RULES_VERSION = 'recon-1.3.0';
 
 export type FilterKey = 'driver' | 'plate' | 'route' | 'date';
 export type FilterMode = 'exclusive' | 'preferred';
@@ -108,12 +108,15 @@ export function compareRecord(t: TerpelInput, c: SilogCandidate): Difference[] {
   const diffs: Difference[] = [];
   const vol = toNumber(t.transportVolume);
   const w = toNumber(c.remesaWeight);
-  if (vol !== null && vol !== 0 && (w === null || !sameNumber(vol, w))) {
-    diffs.push({ field: 'volume', terpel: vol, silogtran: w, severity: 'adjustable' });
-  }
   const val = toNumber(t.netValue);
   const tot = toNumber(c.totalRemesa);
-  if (val !== null && (tot === null || !sameNumber(val, tot))) {
+  // Si el total de la remesa en Silogtran coincide EXACTAMENTE con el valor de Terpel, no hay diferencia de
+  // volumen ni de flete: el peso cumplido no viene en el informe ni en la consulta de la remesa.
+  const totalMatches = val !== null && tot !== null && sameNumber(val, tot);
+  if (!totalMatches && vol !== null && vol !== 0 && (w === null || !sameNumber(vol, w))) {
+    diffs.push({ field: 'volume', terpel: vol, silogtran: w, severity: 'adjustable' });
+  }
+  if (val !== null && !totalMatches) {
     diffs.push({ field: 'value', terpel: val, silogtran: tot, severity: 'adjustable' });
   }
   if (t.plateNormalized && c.plateNormalized && t.plateNormalized !== c.plateNormalized) {

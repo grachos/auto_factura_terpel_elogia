@@ -162,7 +162,7 @@ test('Fase 3: facturación genera, simula, aprueba y aplica (simulado); banner y
   await page.getByTestId('nav-recon').click();
   await page.getByTestId('recon-from').fill('2026-01-01');
   await page.getByTestId('recon-to').fill('2026-01-31');
-  await expect(page.getByTestId('recon-informe-note')).toContainText('no refleja');
+  await expect(page.getByTestId('recon-informe-note')).toContainText('recon-1.3.0');
   await page.getByTestId('recon-button').click();
   await expect(page.getByTestId('recon-status')).toContainText('Completada', { timeout: 30_000 });
 

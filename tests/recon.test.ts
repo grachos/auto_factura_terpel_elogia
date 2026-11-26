@@ -95,6 +95,26 @@ describe('motor de cascada', () => {
     expect(r.status).toBe('EXACT');
     expect(r.differences.some((d) => d.field === 'plate' && d.severity === 'info')).toBe(true);
   });
+  it('regla recon-1.3.0: total igual al valor de Terpel => EXACT aunque el volumen difiera (sin diferencias ni propuesta)', () => {
+    const r = reconcile(terpel(), [cand({ remesaWeight: '10000', totalRemesa: '4312100' })], params());
+    expect(r.status).toBe('EXACT');
+    expect(r.differences.filter((d) => d.severity === 'adjustable')).toEqual([]);
+    expect(compareRecord(terpel(), cand({ remesaWeight: '1', totalRemesa: '4312100' }))).toEqual([]);
+  });
+  it('regla recon-1.3.0: volumen y total distintos => MATCH_WITH_DIFFERENCES con ambas diferencias', () => {
+    const r = reconcile(terpel(), [cand({ remesaWeight: '10000', totalRemesa: '4000000' })], params());
+    expect(r.status).toBe('MATCH_WITH_DIFFERENCES');
+    expect(r.differences.map((d) => d.field)).toEqual(['volume', 'value']);
+    // mismo volumen y total distinto: solo valor
+    expect(reconcile(terpel(), [cand({ totalRemesa: '4000000' })], params()).differences.map((d) => d.field)).toEqual(['value']);
+  });
+  it('volumen 0 sigue igual: no se compara el volumen; el valor decide', () => {
+    expect(reconcile(terpel({ transportVolume: '0' }), [cand({ remesaWeight: '1', totalRemesa: '4312100' })], params({ zeroVolumeMode: 'reconcile_always' })).status).toBe('EXACT');
+    const d = reconcile(terpel({ transportVolume: '0' }), [cand({ totalRemesa: '1' })], params({ zeroVolumeMode: 'reconcile_always' }));
+    expect(d.status).toBe('MATCH_WITH_DIFFERENCES');
+    expect(d.differences.map((x) => x.field)).toEqual(['value']);
+    expect(d.weightSource).toBe('silogtran');
+  });
   it('volumen 0 no se compara', () => {
     const r = reconcile(terpel({ transportVolume: '0' }), [cand({ remesaWeight: '777' })], params({ zeroVolumeMode: 'reconcile_always' }));
     expect(r.status).toBe('EXACT');
@@ -247,8 +267,8 @@ async function seedSixCases(db: Db): Promise<Record<string, unknown>[]> {
   await seedService(db, { transport: 'T-E', date: '2026-11-20', driver: '0000000015', route: 'C1-SANTA MARTA - CARTAGENA', plate: 'AAA005', volume: 9984, value: 2346240 });
   await seedService(db, { transport: 'T-F', date: '2026-11-21', driver: '0000000016', route: 'C3-SANTA MARTA - BARRANCABERMEJA', plate: 'AAA006', volume: 0, value: 4453353 });
   return [
-    ...repeated(silogRow({ ...base, manifiesto: 'MA', remesa_codigo: 1, fecha: '2026-11-15', conductor_documento: '11', placa: 'AAA001', ciudad_origen_remesa: 'SANTA MARTA', ciudad_destino_remesa: 'CARTAGENA', remesa_peso: 10460, total_remesa: '2464445' }), 3),
-    silogRow({ ...base, manifiesto: 'MB', remesa_codigo: 2, fecha: '2026-11-16', conductor_documento: '12', placa: 'AAA002', ciudad_origen_remesa: 'SANTA MARTA', ciudad_destino_remesa: 'LA PINTADA', remesa_peso: 10122, total_remesa: '6694492' }),
+    ...repeated(silogRow({ ...base, manifiesto: 'MA', remesa_codigo: 1, fecha: '2026-11-15', conductor_documento: '11', placa: 'AAA001', ciudad_origen_remesa: 'SANTA MARTA', ciudad_destino_remesa: 'CARTAGENA', remesa_peso: 10460, total_remesa: '2460000' }), 3),
+    silogRow({ ...base, manifiesto: 'MB', remesa_codigo: 2, fecha: '2026-11-16', conductor_documento: '12', placa: 'AAA002', ciudad_origen_remesa: 'SANTA MARTA', ciudad_destino_remesa: 'LA PINTADA', remesa_peso: 10122, total_remesa: '6690000' }),
     silogRow({ ...base, manifiesto: 'MC', remesa_codigo: 3, fecha: '2026-11-20', conductor_documento: '13', placa: 'AAA003', ciudad_origen_remesa: 'SANTA MARTA', ciudad_destino_remesa: 'LA PINTADA', remesa_peso: 9000, total_remesa: '6700414' }),
     silogRow({ ...base, manifiesto: 'MD', remesa_codigo: 4, fecha: '2026-11-19', conductor_documento: '14', placa: 'AAA004', ciudad_origen_remesa: 'SANTA MARTA', ciudad_destino_remesa: 'LIZAMA', remesa_peso: 10075, total_remesa: '4312100' }),
     silogRow({ ...base, manifiesto: 'ME', remesa_codigo: 5, fecha: '2026-11-18', conductor_documento: '15', placa: 'AAA005', ciudad_origen_remesa: 'SANTA MARTA', ciudad_destino_remesa: 'CARTAGENA', remesa_peso: 9979, total_remesa: '2735616' }),
@@ -293,10 +313,10 @@ describe('conciliación (BD)', () => {
     expect(results).toHaveLength(6);
     const a = byTransport(results, 'T-A');
     expect(a.status).toBe('MATCH_WITH_DIFFERENCES');
-    expect(a.differences.map((d) => d.field)).toEqual(['volume']);
+    expect(a.differences.map((d) => d.field)).toEqual(['volume', 'value']);
     expect(a.differences[0]).toMatchObject({ terpel: 10487, silogtran: 10460, severity: 'adjustable' });
     expect(a.trace.map((t) => t.after)).toEqual([1, 1, 1, 1]); // filas repetidas ya deduplicadas
-    expect(byTransport(results, 'T-B').differences.map((d) => d.field)).toEqual(['volume']);
+    expect(byTransport(results, 'T-B').differences.map((d) => d.field)).toEqual(['volume', 'value']);
     expect(byTransport(results, 'T-C').status).toBe('EXACT'); // volumen 0 no se compara
     const d = byTransport(results, 'T-D');
     expect(d.status).toBe('EXACT'); // alias Lizama = Barrancabermeja

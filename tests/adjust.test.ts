@@ -171,8 +171,8 @@ describe('ajustes de tarifa (API)', () => {
     await seedService({ t: 'T-Z', date: '2026-11-21', driver: '0000000018', vol: 0, value: 5000000 }); // volumen 0: peso de Silogtran
     await seedService({ t: 'T-X', date: '2026-11-21', driver: '0000000019', vol: 100, value: 1000 }); // exacto: sin propuesta
     rows = [
-      sRow(1, '11', '2026-11-15', 10460, '2464445'),
-      sRow(2, '12', '2026-11-16', 10122, '6694492'),
+      sRow(1, '11', '2026-11-15', 10460, '2460000'),
+      sRow(2, '12', '2026-11-16', 10122, '6690000'),
       sRow(3, '15', '2026-11-18', 9979, '2735616'),
       sRow(4, '16', '2026-11-18', 2990, '2700000'),
       sRow(5, '17', '2026-11-18', 16000, '2'),
@@ -192,9 +192,9 @@ describe('ajustes de tarifa (API)', () => {
     const ps = await list();
     expect(ps.map((p) => p.transportNumber)).toEqual(['T-A', 'T-B', 'T-E', 'T-L', 'T-N', 'T-Z']);
     const a = ps.find((p) => p.transportNumber === 'T-A') as ProposalDto;
-    expect(a).toMatchObject({ status: 'proposed', tariff: '235', gallons: '10487', currentWeight: '10460', currentTotal: '2464445', targetValue: '2464445', weightSource: 'terpel', simulated: false });
+    expect(a).toMatchObject({ status: 'proposed', tariff: '235', gallons: '10487', currentWeight: '10460', currentTotal: '2460000', targetValue: '2464445', weightSource: 'terpel', simulated: false });
     expect(a.lines.map((l) => [l.field, l.current, l.proposed])).toEqual([
-      ['pesoRemesa', '10460', '10487'], ['cantidadRemesa', '10460', '10487'], ['nuevaTarifa', '100', '235'], ['totalRemesa', '2464445', '2464445'],
+      ['pesoRemesa', '10460', '10487'], ['cantidadRemesa', '10460', '10487'], ['nuevaTarifa', '100', '235'], ['totalRemesa', '2460000', '2464445'],
     ]);
     expect(a.reason).toBe('Ajuste según autorización de pago Terpel, transporte T-A, gasto GT-A');
     expect(ps.find((p) => p.transportNumber === 'T-B')).toMatchObject({ tariff: '658', gallons: '10174' });
@@ -416,5 +416,19 @@ describe('ajustes de tarifa (API)', () => {
 
   it('config pública: el escritor es mock (banner de modo simulado)', async () => {
     expect(j<{ writerKind: string }>(await call('GET', '/api/config')).writerKind).toBe('mock');
+  });
+
+  it('si el servicio ya no tiene diferencias (total igual), al regenerar su propuesta queda obsoleta; si vuelve a tenerlas, se repropone', async () => {
+    const l = await byT('T-L');
+    expect(l.status).toBe('needs_review');
+    await ctx.db.query(`update reconciliation_results set status = 'EXACT' where transport_number = 'T-L'`);
+    const s1 = await generate();
+    expect(s1.staled).toBeGreaterThanOrEqual(1);
+    expect((await list('stale')).some((p) => p.transportNumber === 'T-L')).toBe(true);
+    const ev = j<{ events: ProposalEventDto[] }>(await call('GET', `/api/adjustments/${l.id}`, tok.fact)).events;
+    expect(ev.at(-1)).toMatchObject({ event: 'superseded', toStatus: 'stale' });
+    await ctx.db.query(`update reconciliation_results set status = 'MATCH_WITH_DIFFERENCES' where transport_number = 'T-L'`);
+    await generate();
+    expect((await list()).find((p) => p.transportNumber === 'T-L' && p.status !== 'stale')).toMatchObject({ status: 'needs_review' });
   });
 });
