@@ -193,3 +193,26 @@ test('Fase 3: facturación genera, simula, aprueba y aplica (simulado); banner y
   await expect(page.getByTestId('adj-approve')).toHaveCount(0);
   await expect(page.getByTestId('adj-apply')).toHaveCount(0);
 });
+
+test('Incremento 3b: el banner refleja el modo del escritor (simulado / escritura real) y solo admin lo cambia', async ({ page }) => {
+  await loginAs(page, 'facturacion');
+  await expect(page.getByTestId('sim-banner')).toBeVisible();
+  await page.getByTestId('nav-adjust').click();
+  await expect(page.getByTestId('adj-save-settings')).toHaveCount(0); // facturación no edita el escritor
+  await expect(page.getByTestId('adj-writer-mode')).toBeDisabled();
+  await page.getByTestId('logout').click();
+
+  await loginAs(page, 'admin');
+  page.on('dialog', (d) => void d.accept());
+  await page.getByTestId('nav-adjust').click();
+  await page.getByTestId('adj-writer-mode').selectOption('web');
+  await page.getByTestId('adj-allowlist').fill('0101228393, 555');
+  await page.getByTestId('adj-save-settings').click();
+  await expect(page.getByTestId('real-banner')).toContainText('ESCRITURA REAL ACTIVA');
+  await expect(page.getByTestId('real-banner')).toContainText('101228393, 555');
+  await expect(page.getByTestId('sim-banner')).toHaveCount(0);
+  await page.getByTestId('adj-writer-mode').selectOption('mock');
+  await page.getByTestId('adj-save-settings').click();
+  await expect(page.getByTestId('sim-banner')).toBeVisible();
+  await expect(page.getByTestId('real-banner')).toHaveCount(0);
+});

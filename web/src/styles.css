@@ -69,3 +69,5 @@ ol.timeline { margin: 0; padding-left: 1.1rem; display: grid; gap: .35rem; font-
 .badge.adj-applied { color: var(--ok); border-color: var(--ok); }
 .badge.adj-simulated_applied, .badge.adj-needs_review, .badge.adj-uncertain, .badge.adj-stale { color: var(--warn); border-color: var(--warn); }
 .badge.adj-failed, .badge.adj-verification_failed, .badge.adj-rejected { color: var(--err); border-color: var(--err); }
+
+.real-banner { background: var(--err); color: #fff; text-align: center; padding: .4rem 1rem; font-weight: 700; letter-spacing: .02em; }

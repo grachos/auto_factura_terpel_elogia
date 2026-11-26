@@ -5,6 +5,7 @@ import { api, ApiError } from './api';
 import { hasSession, initAuth, login, loginSilog, logout } from './auth';
 import { Users } from './Users';
 import { Adjustments } from './Adjustments';
+import type { WriterStatusDto } from '../../core/types';
 import { Reconciliation } from './Reconciliation';
 import { Params } from './Params';
 
@@ -143,6 +144,8 @@ function Dashboard({ cfg, me, onLogout }: { cfg: PublicConfigDto; me: MeDto; onL
   const [driving, setDriving] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: 'info' | 'warn' | 'error'; text: string; resumeId?: string } | null>(null);
   const [tab, setTab] = useState<'results' | 'issues'>('results');
+  const [writer, setWriter] = useState<WriterStatusDto | null>(null);
+  useEffect(() => { api.writerStatus().then(setWriter).catch(() => undefined); }, []);
   const [section, setSection] = useState<'import' | 'recon' | 'adjust' | 'params' | 'users'>('import');
   const cancel = useRef(false);
 
@@ -246,7 +249,8 @@ function Dashboard({ cfg, me, onLogout }: { cfg: PublicConfigDto; me: MeDto; onL
           <button onClick={onLogout} data-testid="logout">Salir</button>
         </div>
       </header>
-      {cfg.writerKind === 'mock' && <div className="sim-banner" role="status" data-testid="sim-banner">MODO SIMULADO: Silogtran no se modifica</div>}
+      {(!writer || writer.mode === 'mock') && <div className="sim-banner" role="status" data-testid="sim-banner">MODO SIMULADO: Silogtran no se modifica</div>}
+      {writer?.mode === 'web' && <div className="real-banner" role="alert" data-testid="real-banner">ESCRITURA REAL ACTIVA: {writer.allowAll ? 'TODAS las remesas' : `solo remesas permitidas: ${writer.allowlist.join(', ') || '(ninguna)'}`}</div>}
       <nav className="main-nav" aria-label="Secciones">
         <button aria-current={section === 'import' ? 'page' : undefined} onClick={() => setSection('import')} data-testid="nav-import">Importar autorizaciones</button>
         <button aria-current={section === 'recon' ? 'page' : undefined} onClick={() => setSection('recon')} data-testid="nav-recon">Conciliación</button>
@@ -255,7 +259,7 @@ function Dashboard({ cfg, me, onLogout }: { cfg: PublicConfigDto; me: MeDto; onL
         {has('users.manage') && <button aria-current={section === 'users' ? 'page' : undefined} onClick={() => setSection('users')} data-testid="nav-users">Usuarios</button>}
       </nav>
       {section === 'recon' && <main><Reconciliation cfg={cfg} me={me} /></main>}
-      {section === 'adjust' && has('adjustments.view') && <main><Adjustments cfg={cfg} me={me} /></main>}
+      {section === 'adjust' && has('adjustments.view') && <main><Adjustments cfg={cfg} me={me} writer={writer} onWriter={setWriter} /></main>}
       {section === 'params' && has('params.view') && <main><Params readOnly={!has('params.edit')} /></main>}
       {section === 'users' && has('users.manage') && <main><Users me={me} /></main>}
       <main hidden={section !== 'import'}>

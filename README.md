@@ -201,12 +201,21 @@ Probar en demo: `npm run demo`, entrar como operador, importar enero de 2026 y a
 - **Cliente web** (`core/silog/web/`): login por formulario PRADO + centro de costo, cookie jar cifrada (AES-256-GCM, tabla `silog_web_sessions`, migración 0009), cola serializada, un solo login simultáneo por cuenta, errores claros (`WEB_LOGIN_PASSWORD_CHANGE_REQUIRED`, `WEB_LOGIN_2FA_NOT_SUPPORTED`, `WEB_LOGIN_REJECTED`, `WEB_WAF_FAILED`, ...). No registra cuerpos, cookies ni claves.
 - **Reto AWS WAF**: función separada `api/silog-waf.ts` (`@sparticuz/chromium` + `puppeteer-core`, 60 s) que SOLO devuelve las cookies `aws-waf*`; exige HMAC derivado de `APP_SESSION_SECRET`. La función principal no incluye Chromium. Las cookies del WAF se guardan cifradas y se reutilizan. Local: `WAF_CHROME_PATH`. Prueba manual: `WAF_CHROME_PATH=<chromium> NODE_USE_ENV_PROXY=1 npx tsx` con un script que llame a `LocalWafSolver` (el reto se resolvió en ~2,3 s en el sandbox).
 - **Diagnóstico** (`POST /api/admin/silog-web/diagnostic`, solo admin, auditado): entra con la cuenta `adjust` guardada y devuelve la ESTRUCTURA de la pantalla (controles, widgets, tablas, validadores). Banderas del cuerpo: `lookup` (autocompletado de la remesa) y `search` (envío del botón *Buscar*, de lectura). Nunca pulsa Grabar ni devuelve cookies, claves o valores personales. Resultado documentado en `docs/silogtran-cambio-tarifa.md`.
-- **Escritura real: NO implementada** (`SILOG_WRITER=mock`); es el incremento 3b.
+- **Escritura real**: implementada en el incremento 3b (ver más abajo); desactivada por defecto.
 - Variables nuevas: `SILOG_WEB_BASE_URL`, `WAF_SOLVER_URL`, `WAF_CHROME_PATH` (todas opcionales; ver `.env.example`).
+
+## Escritor real de cambio de tarifa (incremento 3b)
+
+- **`SilogtranWebWriter`** (`core/silog/web/writer.ts`) implementa la secuencia de `docs/silogtran-cambio-tarifa.md` con la sesión web cifrada de 3a: autocompletado exacto de la remesa, razón, *Buscar*, lectura de `anterior_*` (reversa), campos `nuevo_*`, **un único** `grabar` (con `IDLockHidden` y `grabar_uuid` de la página), relectura de la pantalla y del informe (hasta 3 lecturas). Mensaje desconocido o respuesta perdida = `uncertain`; sin reintentos ciegos.
+- **Ensayo**: `POST /api/adjustments/:id/rehearse` (facturación/admin) hace todo MENOS Grabar y devuelve lo que se enviaría, la reversa y las comprobaciones; registra el evento `rehearsed` sin cambiar el estado. Con `{"real": true}` ensaya contra la pantalla real aunque el modo sea simulado.
+- **Parámetros del escritor** (solo admin, auditados; Ajustes → «Escritor de ajustes»): `writer_mode` (`mock` por defecto | `web`) y `writer_allowlist` (remesas permitidas; «todas» exige confirmación). `SILOG_WRITER` solo es el valor inicial. Con `web` y una remesa fuera de la lista: `REMESA_NOT_ALLOWED`. Banner: «MODO SIMULADO» o «ESCRITURA REAL ACTIVA: solo remesas permitidas: …».
+- **Escritura real**: exige cuenta de ajustes, remesa permitida y un ensayo válido reciente de la misma carga; misma máquina de estados de la Fase 3. `simulated=false` solo con el escritor web.
+- **Reversa**: «Revertir» crea una propuesta con los valores anteriores guardados, sujeta a aprobación.
+- Activación paso a paso, verificaciones y reversa: `docs/silogtran-cambio-tarifa.md`. Migración `0010_real_writer.sql`. La función principal pasó a `maxDuration` 60 s (la escritura puede tardar).
 
 ## Variables de entorno
 
-Ver [`.env.example`](.env.example) (sin valores reales). Las principales: `AUTH_MODE`, `MAIL_SOURCE`, `MAIL_MAILBOX`, `MAIL_ALLOWED_SENDER`, `MAIL_SUBJECT_PATTERN`, `MAIL_REQUIRE_DMARC_PASS`, `BUSINESS_KEY_STRATEGY`, `GRAPH_*`, `DATABASE_URL`, `STORAGE_DRIVER`, `SUPABASE_*`, `SILOG_*` (Fase 2), `ENCRYPTION_KEY` y `APP_SESSION_SECRET` (usuarios), `SILOG_WRITER` (`mock` por defecto). Las variables `MAIL_*` solo siembran la primera configuración; luego un administrador la edita desde la UI.
+Ver [`.env.example`](.env.example) (sin valores reales). Las principales: `AUTH_MODE`, `MAIL_SOURCE`, `MAIL_MAILBOX`, `MAIL_ALLOWED_SENDER`, `MAIL_SUBJECT_PATTERN`, `MAIL_REQUIRE_DMARC_PASS`, `BUSINESS_KEY_STRATEGY`, `GRAPH_*`, `DATABASE_URL`, `STORAGE_DRIVER`, `SUPABASE_*`, `SILOG_*` (Fase 2), `ENCRYPTION_KEY` y `APP_SESSION_SECRET` (usuarios), `SILOG_WRITER` (`mock` por defecto; solo valor inicial: el modo efectivo está en la BD). Las variables `MAIL_*` solo siembran la primera configuración; luego un administrador la edita desde la UI.
 
 ## Reglas de negocio implementadas
 

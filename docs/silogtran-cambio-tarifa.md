@@ -23,8 +23,8 @@ No hay casilla «Remesa»: el campo Remesa es un autocompletado. La tabla de res
 - Tabla `ItemsRemesa` (una fila por ítem, prefijo `ctl0$MainModule$ItemsRemesa$ctl0$`): editables `nuevo_peso`, `nuevo_cantidad`, `nueva_tarifa` (TextBox); ocultos `anterior_peso`, `anterior_cantidad`, `anterior_tarifa`.
 - Valores leídos para la remesa de prueba: peso 10500, cantidad 10500, tarifa 235 (anterior = nuevo, sin cambios). Validadores `Requeridos` sobre remesa, razón, nuevo peso, nueva cantidad y nueva tarifa.
 
-### Discrepancia a resolver antes de escribir
-El informe de Silogtran (API) indica `remesa_peso` 10460 y `total_remesa` 2.464.445 (= 10487 × 235), mientras la pantalla muestra peso/cantidad **10500** con tarifa 235. La pantalla manda: la lectura previa del escritor real debe usar los `anterior_*` de la pantalla (no solo el informe) y abortar como `stale` si no son los esperados. Hay que entender con el negocio qué campo del informe corresponde a «Peso Remesa» de la pantalla.
+### Discrepancia (resuelta por el negocio)
+El informe de Silogtran (API) indica `remesa_peso` 10460 y `total_remesa` 2.464.445 (= 10487 × 235), mientras la pantalla muestra peso/cantidad **10500** con tarifa 235. **Decisión del negocio:** el peso de la pantalla (10500) es el peso ORIGINAL de la solicitud; al cambiarlo cambia `remesa_peso` del informe. Por eso NO se exige que los `anterior_*` coincidan con el informe. Hay dos comprobaciones distintas: (a) el registro del informe sigue como se esperaba al proponer (CUMPLIDO, sin factura, mismos valores; si no, `stale`); (b) en la pantalla se leen `anterior_*` antes de grabar, se guardan como valores de REVERSA y no deben cambiar entre el ensayo y el grabado (si cambian, se aborta como `stale`).
 
 ## Secuencia propuesta del escritor real (incremento 3b; NO implementada)
 1. Sesión web de la cuenta de ajustes (reutilizar cookies cifradas; bloqueo de una sola sesión).
@@ -42,3 +42,23 @@ El informe de Silogtran (API) indica `remesa_peso` 10460 y `total_remesa` 2.464.
 - Reto WAF: puede bloquear la IP de la función; el token se reutiliza guardado (cifrado) y solo se relanza Chromium si caduca.
 - Estado pendiente en la sesión de Silogtran: serializar siempre las peticiones y una sola sesión por cuenta.
 - Aún no se probó el efecto de *Buscar* repetido ni de `grabar_uuid` reutilizado.
+
+## Escritor real (incremento 3b) — `SilogtranWebWriter` (`core/silog/web/writer.ts`)
+Implementa la secuencia anterior. Un único método (`postGrabar`) envía Grabar y solo `changeTariff` lo llama; el **ensayo** (`rehearse`) hace todos los pasos MENOS Grabar.
+
+### Activar la escritura real (paso a paso, solo admin)
+1. Usuarios → Cuenta de ajustes: guardar la credencial (ya hecho) y comprobar «Probar conexión».
+2. Ajustes → generar propuestas de la conciliación, aprobar la propuesta de la remesa de prueba (0101228393).
+3. Pulsar **Ensayo** (o «Ensayo contra la pantalla real» mientras el modo sea simulado): se fijan los tres campos sin grabar y se muestran razón, peso, cantidad, tarifa y los valores anteriores (reversa). Debe pasar todas las comprobaciones.
+4. Ajustes → «Escritor de ajustes»: modo **ESCRITURA REAL** y, en «Remesas permitidas», solo `0101228393`. Guardar (pide confirmación). El banner pasa a «ESCRITURA REAL ACTIVA: solo remesas permitidas: …». «Todas» exige una confirmación adicional; no se recomienda.
+5. Pulsar **Aplicar**: el diálogo repite el ensayo y muestra remesa, valores nuevos, reversa y cuenta usada. La escritura real exige un ensayo válido de las últimas 24 h con la misma carga (`REHEARSAL_REQUIRED`) y que la remesa esté permitida (`REMESA_NOT_ALLOWED`).
+6. Al terminar volver el modo a «Simulado» y vaciar la lista si no se va a seguir escribiendo.
+
+### Qué se verifica tras grabar
+- Mensaje de Grabar: solo un texto de éxito reconocido cuenta como éxito; cualquier mensaje desconocido o ambiguo deja la propuesta `uncertain` (nunca éxito).
+- Relectura de la pantalla (Buscar de nuevo): `anterior_*` deben ser los valores nuevos.
+- Relectura del informe (hasta 3 lecturas separadas por unos segundos): `remesa_peso` = galones y `total_remesa` = valor de Terpel; si no coincide → `verification_failed` (no se factura).
+- Si la respuesta se pierde o el mensaje es ambiguo → `uncertain`: se usa «Consultar estado» (relee la pantalla) antes de cualquier reintento; jamás hay reintento ciego.
+
+### Revertir
+En una propuesta aplicada de verdad (o con verificación fallida/incierta) pulsar **Revertir**: crea una propuesta de reversa con los valores anteriores guardados (para la remesa de prueba: peso 10500, cantidad 10500, tarifa 235) que se aprueba, se ensaya y se aplica como cualquier otra (la reversa se verifica en la pantalla). Procedimiento manual de respaldo: abrir la pantalla «Procedimiento de Cambio Tarifa» con la remesa, escribir esos valores y grabar con la razón «Reversa de ajuste de tarifa».

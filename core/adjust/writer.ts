@@ -1,5 +1,3 @@
-import { AppError } from '../errors.js';
-
 /**
  * Escritor en Silogtran. El único cambio previsto es la pantalla «Procedimiento de Cambio Tarifa»
  * (por remesa: Remesa, Razón de cambio y, por ítem, Peso Remesa, Cantidad Remesa y Nueva Tarifa).
@@ -12,18 +10,41 @@ export interface TariffChange {
   nuevaTarifa: string;
 }
 
+/** Valores que la pantalla muestra (y guarda como REVERSA antes de grabar). */
+export interface ScreenValues { peso: string; cantidad: string; tarifa: string }
+
+export interface WriteContext {
+  actor: string | null;
+  /** Valores `anterior_*` vistos en el ensayo: si cambian antes de grabar, se aborta como obsoleto. */
+  expectedBefore?: ScreenValues | null;
+}
+
 export type WriterOutcome =
-  | { outcome: 'applied' }
-  | { outcome: 'rejected' | 'conflict'; detail: string } // CERTEZA de que no se aplicó
-  | { outcome: 'uncertain'; detail: string }; // timeout / respuesta ambigua: hay que consultar el estado
+  | { outcome: 'applied'; before?: ScreenValues; detail?: string }
+  | { outcome: 'rejected' | 'conflict' | 'stale'; detail: string; before?: ScreenValues } // CERTEZA de que no se aplicó
+  | { outcome: 'uncertain'; detail: string; before?: ScreenValues }; // timeout / respuesta ambigua: hay que consultar el estado
+
+export interface RehearsalCheck { name: string; ok: boolean; detail?: string }
+
+/** Resultado de un ensayo: todos los pasos menos Grabar. */
+export interface RehearsalResult {
+  simulated: boolean;
+  payload: TariffChange;
+  before: ScreenValues | null;
+  checks: RehearsalCheck[];
+  wouldPostGrabar: false;
+  grabar?: { target: string | null; hasUuid: boolean; hasLock: boolean };
+}
 
 export interface SilogtranWriter {
   readonly kind: 'mock' | 'web';
   /** true: nada de lo que se "aplica" toca Silogtran (las propuestas quedan en simulated_applied). */
   readonly simulated: boolean;
-  changeTariff(change: TariffChange): Promise<WriterOutcome>;
+  changeTariff(change: TariffChange, ctx?: WriteContext): Promise<WriterOutcome>;
+  /** Ensayo: deja los campos fijados y devuelve lo que se enviaría; NUNCA pulsa Grabar. */
+  rehearse(change: TariffChange, ctx?: WriteContext): Promise<RehearsalResult>;
   /** Consulta si un cambio quedó aplicado (para resolver un resultado incierto antes de cualquier reintento). */
-  getChangeState(remesaCode: string, change: TariffChange): Promise<'applied' | 'not_applied' | 'unknown'>;
+  getChangeState(remesaCode: string, change: TariffChange, ctx?: WriteContext): Promise<'applied' | 'not_applied' | 'unknown'>;
 }
 
 export type MockWriterMode = 'success' | 'reject' | 'conflict' | 'timeout';
@@ -54,26 +75,11 @@ export class MockSilogtranWriter implements SilogtranWriter {
     }
   }
 
+  async rehearse(change: TariffChange): Promise<RehearsalResult> {
+    return { simulated: true, payload: change, before: null, wouldPostGrabar: false, checks: [{ name: 'escritor simulado: no se contacta a Silogtran', ok: true }] };
+  }
+
   async getChangeState(remesaCode: string): Promise<'applied' | 'not_applied' | 'unknown'> {
     return this.applied.has(remesaCode) ? 'applied' : 'not_applied';
-  }
-}
-
-/**
- * Esqueleto del escritor real. Pantalla: https://construproyec.colombiasoftware.net/index.php?page=Despacho.Remesa_003.CambioTarifa_105
- * (PRADO; Procedimiento de Cambio Tarifa por remesa). Decisión: vivirá DENTRO de esta app (incremento posterior: diagnóstico
- * de solo lectura de la pantalla con la cuenta de ajustes, login web con reto AWS WAF vía Chromium, cookies de sesión
- * reutilizables, escritura y verificación). Contrato esperado (pendiente): login WEB con reto AWS WAF con la cuenta de ajustes,
- * abrir «Procedimiento de Cambio Tarifa», diligenciar Remesa, Razón de cambio, Peso Remesa, Cantidad Remesa y
- * Nueva Tarifa (tipo GALON, cliente Terpel; separador decimal punto) y confirmar. NO escribe nada hoy.
- */
-export class SilogtranWebWriter implements SilogtranWriter {
-  readonly kind = 'web' as const;
-  readonly simulated = false;
-  async changeTariff(): Promise<WriterOutcome> {
-    throw new AppError(501, 'WRITER_NOT_IMPLEMENTED', 'El escritor real de Silogtran aún no está implementado: faltan la ruta de la pantalla "Procedimiento de Cambio Tarifa" y una cuenta de ajustes habilitada');
-  }
-  async getChangeState(): Promise<'applied' | 'not_applied' | 'unknown'> {
-    throw new AppError(501, 'WRITER_NOT_IMPLEMENTED', 'El escritor real de Silogtran aún no está implementado');
   }
 }

@@ -5,8 +5,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { compareAdjustWorkbook, flatten } from '../core/adjust/excel.js';
 import { ALL_STATUSES, TRANSITIONS, _moveForTests, autoEligibility, canTransition, renderReason, validateTemplate } from '../core/adjust/service.js';
 import { computeTariff, normalizeNumberString } from '../core/adjust/tariff.js';
-import { MockSilogtranWriter, SilogtranWebWriter } from '../core/adjust/writer.js';
-import type { SilogtranWriter, TariffChange, WriterOutcome } from '../core/adjust/writer.js';
+import { MockSilogtranWriter } from '../core/adjust/writer.js';
+import type { RehearsalResult, SilogtranWriter, TariffChange, WriterOutcome } from '../core/adjust/writer.js';
 import { createContext } from '../core/context.js';
 import type { AppContext } from '../core/context.js';
 import type { Db } from '../core/db/types.js';
@@ -115,6 +115,7 @@ class RealisticTestWriter implements SilogtranWriter {
     }
     return { outcome: 'applied' };
   }
+  async rehearse(c: TariffChange): Promise<RehearsalResult> { return { simulated: false, payload: c, before: null, checks: [], wouldPostGrabar: false }; }
   async getChangeState(): Promise<'applied' | 'not_applied' | 'unknown'> { return 'unknown'; }
 }
 
@@ -182,6 +183,7 @@ describe('ajustes de tarifa (API)', () => {
     ctx.silog = new MockSilogtranSource(rows);
     mockWriter = new MockSilogtranWriter();
     ctx.writer = mockWriter;
+    ctx.verifyDelayMs = 0;
     runId = await reconcile('2026-11-17', '2026-11-25');
   });
   afterAll(async () => ctx.db.close());
@@ -354,23 +356,24 @@ describe('ajustes de tarifa (API)', () => {
     expect(aud).toEqual(expect.arrayContaining(['adjustment.generate', 'adjustment.approve', 'adjustment.apply', 'adjustment.simulate', 'adjustment.discard_simulated', 'adjust_settings.update']));
   });
 
-  it('escritor real sin implementar: cuenta de ajustes obligatoria y error claro; nada cambia de estado', async () => {
-    const web = new SilogtranWebWriter();
-    ctx.writer = web;
+  it('modo web: cuenta de ajustes y lista de remesas permitidas obligatorias; nada cambia de estado', async () => {
+    await ctx.db.query(`update adjustment_settings set writer_mode = 'web'`);
     const a = await byT('T-A');
     await call('POST', `/api/adjustments/${a.id}/approve`, tok.fact);
     const noAcc = await call('POST', `/api/adjustments/${a.id}/apply`, tok.fact);
     expect(j<{ error: { code: string } }>(noAcc).error.code).toBe('ADJUST_ACCOUNT_NOT_CONFIGURED');
     expect((await byT('T-A')).status).toBe('approved');
     await ctx.db.query(`insert into silog_credentials (purpose, silog_user, password_enc) values ('adjust','cuenta.ajustes','v1:x:y:z')`);
-    const notImpl = await call('POST', `/api/adjustments/${a.id}/apply`, tok.fact);
-    expect(notImpl.status).toBe(501);
-    expect(j<{ error: { code: string } }>(notImpl).error.code).toBe('WRITER_NOT_IMPLEMENTED');
-    expect((await byT('T-A')).status).toBe('approved'); // se revierte: no se escribió nada
-    const sim = j<{ simulated: boolean; accountUser: string }>(await call('POST', `/api/adjustments/${a.id}/simulate`, tok.fact));
-    expect(sim).toMatchObject({ simulated: false, accountUser: 'cuenta.ajustes' });
-    expect(j<{ writerKind: string }>(await call('GET', '/api/config')).writerKind).toBe('web');
-    ctx.writer = mockWriter;
+    const blocked = await call('POST', `/api/adjustments/${a.id}/apply`, tok.fact);
+    expect(blocked.status).toBe(409);
+    expect(j<{ error: { code: string } }>(blocked).error.code).toBe('REMESA_NOT_ALLOWED');
+    expect(j<{ error: { code: string } }>(await call('POST', `/api/adjustments/${a.id}/rehearse`, tok.fact)).error.code).toBe('REMESA_NOT_ALLOWED');
+    expect((await byT('T-A')).status).toBe('approved');
+    const sim = j<{ simulated: boolean; accountUser: string; blocked: string }>(await call('POST', `/api/adjustments/${a.id}/simulate`, tok.fact));
+    expect(sim).toMatchObject({ simulated: false, accountUser: 'cuenta.ajustes', blocked: 'REMESA_NOT_ALLOWED' });
+    expect(j<{ mode: string; simulated: boolean }>(await call('GET', '/api/adjustments/writer-status', tok.view))).toMatchObject({ mode: 'web', simulated: false });
+    await ctx.db.query(`update adjustment_settings set writer_mode = null`);
+    await ctx.db.query(`delete from silog_credentials`);
   });
 
   it('escritor no simulado: verificación posterior (applied) y verification_failed si no coincide', async () => {
@@ -378,7 +381,7 @@ describe('ajustes de tarifa (API)', () => {
     ctx.writer = real;
     const a = await byT('T-A'); // sigue aprobada
     const ok = j<ProposalDto>(await call('POST', `/api/adjustments/${a.id}/apply`, tok.fact));
-    expect(ok).toMatchObject({ status: 'applied', simulated: false, accountUser: 'cuenta.ajustes' });
+    expect(ok).toMatchObject({ status: 'applied', simulated: false });
     expect(ok.verification).toMatchObject({ ok: true });
     expect(rows[0]?.remesa_peso).toBe(10487);
     // segunda: el escritor "dice" aplicar pero Silogtran no cambió => verification_failed

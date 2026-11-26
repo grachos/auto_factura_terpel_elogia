@@ -1,5 +1,5 @@
 import type {
-  AdjustSettingsDto, ApplyPreviewDto, ProposalDto, ProposalEventDto,
+  AdjustSettingsDto, ApplyPreviewDto, ProposalDto, ProposalEventDto, RehearsalDto, WriterStatusDto,
   ApiErrorDto, MailConfigDto, MatchFilterDto, MeDto, PlaceAliasDto, PublicConfigDto, ReconParamsDto, ReconResultDto, ReconRunDetailDto,
   ReconRunDto, ReconSettingsDto, ReconStepDto, RunDetailDto, RunDto, StepResultDto,
 } from '../../core/types';
@@ -86,7 +86,10 @@ export const api = {
   checkProposal: (id: string) => request<ProposalDto>('POST', `/api/adjustments/${id}/check`),
   applyBatch: (ids: string[]) => request<{ results: { id: string; ok: boolean; status?: string; code?: string; message?: string }[] }>('POST', '/api/adjustments/apply-batch', { ids }),
   adjustSettings: () => request<AdjustSettingsDto>('GET', '/api/adjustments/settings'),
-  saveAdjustSettings: (s: Partial<AdjustSettingsDto>) => request<AdjustSettingsDto>('PUT', '/api/adjustments/settings', s),
+  saveAdjustSettings: (s: Partial<AdjustSettingsDto> & { confirmAll?: boolean }) => request<AdjustSettingsDto>('PUT', '/api/adjustments/settings', s),
+  writerStatus: () => request<WriterStatusDto>('GET', '/api/adjustments/writer-status'),
+  rehearseProposal: (id: string, real = false) => request<RehearsalDto>('POST', `/api/adjustments/${id}/rehearse`, real ? { real: true } : {}),
+  revertProposal: (id: string) => request<ProposalDto>('POST', `/api/adjustments/${id}/revert`),
   discardSimulated: () => request<{ discarded: number }>('POST', '/api/adjustments/discard-simulated'),
   exportAdjustments: (runId: string) => request<{ url: string; rows: number }>('POST', '/api/adjustments/export', { runId }),
   // Fase 2

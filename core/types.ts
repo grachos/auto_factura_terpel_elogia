@@ -291,6 +291,11 @@ export interface ProposalDto {
   autoAllowed: boolean;
   rulesVersion: string;
   updatedAt: string;
+  kind: 'adjust' | 'reversal';
+  reversalOf: string | null;
+  quantity: string | null;
+  /** Valores anteriores de la pantalla, guardados antes de grabar (para revertir). */
+  reversalValues: ScreenValuesDto | null;
 }
 
 export interface ProposalEventDto {
@@ -307,6 +312,33 @@ export interface ProposalEventDto {
 export interface AdjustSettingsDto {
   reasonTemplate: string;
   autoEnabled: boolean;
+  /** Modo efectivo del escritor: mock (simulado) o web (escritura REAL). */
+  writerMode: 'mock' | 'web';
+  /** Códigos de remesa permitidos para la escritura real (sin ceros a la izquierda). */
+  writerAllowlist: string[];
+  /** Si true, la escritura real se permite en cualquier remesa (exige confirmación explícita al activarlo). */
+  writerAllowAll: boolean;
+}
+
+export interface WriterStatusDto {
+  mode: 'mock' | 'web';
+  simulated: boolean;
+  allowAll: boolean;
+  allowlist: string[];
+}
+
+export interface ScreenValuesDto { peso: string; cantidad: string; tarifa: string }
+
+export interface RehearsalDto {
+  proposalId: string;
+  simulated: boolean;
+  writerKind: string;
+  payload: { remesaCode: string; reason: string; pesoRemesa: string; cantidadRemesa: string; nuevaTarifa: string };
+  /** Valores anteriores de la pantalla (reversa). */
+  before: ScreenValuesDto | null;
+  checks: { name: string; ok: boolean; detail?: string }[];
+  allChecksOk: boolean;
+  wouldPostGrabar: false;
 }
 
 export interface ApplyPreviewDto {

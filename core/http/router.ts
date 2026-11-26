@@ -11,7 +11,7 @@ import type { WebPurpose } from '../silog/web/session.js';
 import { generateAdjustExport } from '../adjust/excel.js';
 import {
   applyBatch, applyProposal, approveProposal, checkUncertain, discardSimulated, generateProposals, getAdjustSettings, getEvents, getProposal,
-  listProposals, rejectProposal, saveAdjustSettings, simulateProposal,
+  listProposals, rehearseProposal, rejectProposal, revertProposal, saveAdjustSettings, simulateProposal, writerStatus,
 } from '../adjust/service.js';
 import {
   createUser, deleteUserPassword, listServiceCredentials, listUsers, parsePurpose, saveServiceCredential, saveUserPassword, testServiceCredential,
@@ -164,7 +164,7 @@ async function dispatch(ctx: AppContext, req: HttpRequest, setRoute: (r: string)
       supabaseAnonKey: ctx.auth.mode === 'supabase' ? ctx.config.supabase.anonKey || null : null,
       demoUsers: ctx.auth.mode === 'demo' ? DEMO_USERS.map((u) => ({ email: u.email, role: u.role })) : [],
       silogSource: ctx.silog?.kind ?? 'none',
-      writerKind: ctx.writer.kind,
+      writerKind: ctx.config.silog.writer,
       silogLogin: !!ctx.silogAuth && ctx.config.security.appSessionSecret.length >= 32,
     };
     return ok(dto);
@@ -315,7 +315,11 @@ async function dispatchAdjust(
   req: HttpRequest,
 ): Promise<HttpResponse | null> {
   const [a, b, c] = parts;
-  const deps = { db: ctx.db, storage: ctx.storage, silog: ctx.silog, writer: ctx.writer };
+  const settings = await getAdjustSettings(ctx.db, ctx.config.silog.writer);
+  const deps = {
+    db: ctx.db, storage: ctx.storage, silog: ctx.silog, writer: settings.writerMode === 'web' ? ctx.webWriter : ctx.writer,
+    allow: { all: settings.writerAllowAll, list: settings.writerAllowlist }, verifyDelayMs: ctx.verifyDelayMs,
+  };
   const uid = (seg: string | undefined): string => {
     if (!isUuid(seg)) throw new AppError(400, 'INVALID_ID', 'Identificador inválido');
     return seg;
@@ -362,17 +366,24 @@ async function dispatchAdjust(
       from = run.dateFrom;
       to = run.dateTo;
     }
-    return ok({ proposals: await listProposals(ctx.db, { runFrom: from, runTo: to, status }), writerKind: ctx.writer.kind, simulated: ctx.writer.simulated });
+    return ok({ proposals: await listProposals(ctx.db, { runFrom: from, runTo: to, status }), writerKind: deps.writer.kind, simulated: deps.writer.simulated });
+  }
+  if (b === 'writer-status' && parts.length === 2 && is('GET', '/adjustments/writer-status')) {
+    requirePermission(session, 'adjustments.view');
+    return ok(writerStatus(settings));
   }
   if (b === 'settings' && parts.length === 2) {
     if (is('GET', '/adjustments/settings')) {
       requirePermission(session, 'adjustments.view');
-      return ok(await getAdjustSettings(ctx.db));
+      return ok(settings);
     }
     if (is('PUT', '/adjustments/settings')) {
       requirePermission(session, 'adjustments.config');
       const body = asObject(req.body);
-      return ok(await saveAdjustSettings(ctx.db, session.userId, { reasonTemplate: body.reasonTemplate, autoEnabled: body.autoEnabled }));
+      return ok(await saveAdjustSettings(ctx.db, session.userId, {
+        reasonTemplate: body.reasonTemplate, autoEnabled: body.autoEnabled, writerMode: body.writerMode, writerAllowlist: body.writerAllowlist,
+        writerAllowAll: body.writerAllowAll, confirmAll: body.confirmAll,
+      }, ctx.config.silog.writer));
     }
   }
   if (b === 'apply-batch' && parts.length === 2 && is('POST', '/adjustments/apply-batch')) {
@@ -409,6 +420,16 @@ async function dispatchAdjust(
     if (c === 'reject' && is('POST', '/adjustments/:id/reject')) {
       requirePermission(session, 'adjustments.approve');
       return ok(await rejectProposal(ctx.db, session.userId, id, asObject(req.body ?? {}).reason));
+    }
+    if (c === 'rehearse' && is('POST', '/adjustments/:id/rehearse')) {
+      requirePermission(session, 'adjustments.apply');
+      // `real: true`: ensayo contra la pantalla REAL aunque el modo guardado sea simulado (el ensayo nunca graba).
+      const real = asObject(req.body ?? {}).real === true;
+      return ok(await rehearseProposal(real ? { ...deps, writer: ctx.webWriter, allow: { all: true, list: [] } } : deps, session.userId, id));
+    }
+    if (c === 'revert' && is('POST', '/adjustments/:id/revert')) {
+      requirePermission(session, 'adjustments.approve');
+      return ok(await revertProposal(deps, session.userId, id));
     }
     if (c === 'apply' && is('POST', '/adjustments/:id/apply')) {
       requirePermission(session, 'adjustments.apply');
