@@ -1,6 +1,7 @@
 import type {
   AdjustSettingsDto, ApplyPreviewDto, AssistedPlanDto, AssistedRunDetailDto, AssistedRunDto, ProposalDto, ProposalEventDto, RehearsalDto, WriterStatusDto,
   ApiErrorDto, MailConfigDto, MatchFilterDto, MeDto, PlaceAliasDto, PublicConfigDto, ReconParamsDto, ReconResultDto, ReconRunDetailDto,
+  InvoiceDto, InvoicePlanDto, InvoiceRehearsalDto, InvoiceRunDetailDto, InvoiceRunDto, InvoiceSettingsDto,
   ReconRunDto, ReconSettingsDto, ReconStepDto, RunDetailDto, RunDto, StepResultDto,
 } from '../../core/types';
 
@@ -98,6 +99,19 @@ export const api = {
   assistedGet: (id: string) => request<AssistedRunDetailDto>('GET', `/api/assisted-runs/${id}`),
   assistedList: (reconRunId: string) => request<{ runs: AssistedRunDto[] }>('GET', `/api/assisted-runs?reconRunId=${reconRunId}`),
   assistedExport: (id: string) => request<{ url: string }>('POST', `/api/assisted-runs/${id}/export`),
+  // Fase 4a: facturación
+  invoicePlan: (reconRunId: string) => request<InvoicePlanDto>('POST', `/api/reconciliations/${reconRunId}/invoices/plan`),
+  invoiceSettings: () => request<InvoiceSettingsDto>('GET', '/api/invoices/settings'),
+  saveInvoiceSettings: (s: Partial<InvoiceSettingsDto> & { confirmAll?: boolean }) => request<InvoiceSettingsDto>('PUT', '/api/invoices/settings', s),
+  invoiceRehearse: (id: string) => request<InvoiceRehearsalDto>('POST', `/api/invoices/${id}/rehearse`),
+  invoiceIssue: (id: string) => request<InvoiceDto>('POST', `/api/invoices/${id}/issue`, { confirm: true }),
+  invoiceCheck: (id: string) => request<InvoiceDto>('POST', `/api/invoices/${id}/check`),
+  invoiceList: (status?: string) => request<{ invoices: InvoiceDto[] }>('GET', `/api/invoices${status ? `?status=${status}` : ''}`),
+  invoiceRunCreate: (reconRunId: string, invoiceIds: string[]) => request<InvoiceRunDetailDto>('POST', '/api/invoice-runs', { reconRunId, invoiceIds, confirm: true }),
+  invoiceRunStep: (id: string, resume = false) => request<InvoiceRunDetailDto>('POST', `/api/invoice-runs/${id}/step`, resume ? { resume: true } : {}),
+  invoiceRunGet: (id: string) => request<InvoiceRunDetailDto>('GET', `/api/invoice-runs/${id}`),
+  invoiceRunList: (reconRunId: string) => request<{ runs: InvoiceRunDto[] }>('GET', `/api/invoice-runs?reconRunId=${reconRunId}`),
+  invoiceRunExport: (id: string) => request<{ url: string }>('POST', `/api/invoice-runs/${id}/export`),
   // Fase 2
   listRecon: () => request<{ runs: ReconRunDto[] }>('GET', '/api/reconciliations'),
   createRecon: (dateFrom: string, dateTo: string, sync = true) => request<ReconRunDto>('POST', '/api/reconciliations', { dateFrom, dateTo, sync }),

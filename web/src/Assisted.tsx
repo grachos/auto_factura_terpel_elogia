@@ -134,7 +134,7 @@ export function Assisted({ reconRunId, me, writer, onChanged }: { reconRunId: st
           </div>
           {(run.run.status === 'completed' || run.run.status === 'halted') && (
             <>
-              <p className="muted" data-testid="assisted-report-note">Reporte: {run.run.applied} aplicada(s), {run.run.skipped} omitida(s), {run.run.pending} pendiente(s), {run.run.excluded.length} excluida(s) del plan. Facturación: pendiente (fase 4, no implementada).</p>
+              <p className="muted" data-testid="assisted-report-note">Reporte: {run.run.applied} aplicada(s), {run.run.skipped} omitida(s), {run.run.pending} pendiente(s), {run.run.excluded.length} excluida(s) del plan. La facturación se hace en la pestaña «Facturación».</p>
               <button onClick={() => download(run.run.id)} data-testid="assisted-download">Descargar reporte (.xlsx)</button>
             </>
           )}

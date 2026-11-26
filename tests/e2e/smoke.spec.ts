@@ -235,7 +235,35 @@ test('Modo asistido: plan, confirmación explícita, corrida con progreso y repo
   await page.getByTestId('assisted-start').click();
   await expect(page.getByTestId('assisted-status')).toHaveText('Completada', { timeout: 30_000 });
   await expect(page.getByTestId('assisted-item').first()).toContainText('Aplicada');
-  await expect(page.getByTestId('assisted-report-note')).toContainText('Facturación: pendiente');
+  await expect(page.getByTestId('assisted-report-note')).toContainText('pestaña «Facturación»');
   const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('assisted-download').click()]);
   expect(download.suggestedFilename()).toMatch(/^asistido-.*\.xlsx$/);
+});
+
+test('Facturación 4a: roles, plan con todas marcadas, confirmación, corrida simulada y reporte', async ({ page }) => {
+  await loginAs(page, 'operator');
+  await expect(page.getByTestId('nav-invoices')).toHaveCount(0); // el operador no factura
+  await page.getByTestId('logout').click();
+
+  await loginAs(page, 'admin');
+  await page.getByTestId('nav-invoices').click();
+  await expect(page.getByTestId('invoice-sim-banner')).toContainText('MODO SIMULADO');
+  await expect(page.getByTestId('invoice-settings')).toBeVisible(); // solo admin ve los parámetros
+  await page.getByTestId('invoice-plan-button').click();
+  await expect(page.getByTestId('invoice-plan')).toBeVisible();
+  const checks = page.getByTestId('invoice-check');
+  const n = await checks.count();
+  expect(n).toBeGreaterThan(0);
+  for (let i = 0; i < n; i += 1) await expect(checks.nth(i)).toBeChecked(); // todas marcadas por defecto
+  await expect(page.getByTestId('invoice-start')).toBeDisabled(); // sin confirmar no se puede iniciar
+  await page.getByTestId('invoice-confirm').check();
+  await page.getByTestId('invoice-start').click();
+  await expect(page.getByTestId('invoice-status')).toHaveText('Completada', { timeout: 30_000 });
+  await expect(page.getByTestId('invoice-item').first()).toContainText('Facturada');
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('invoice-download').click()]);
+  expect(download.suggestedFilename()).toMatch(/^facturacion-.*\.xlsx$/);
+  await page.getByTestId('logout').click();
+
+  await loginAs(page, 'viewer');
+  await expect(page.getByTestId('nav-invoices')).toHaveCount(0);
 });

@@ -5,6 +5,7 @@ import { api, ApiError } from './api';
 import { hasSession, initAuth, login, loginSilog, logout } from './auth';
 import { Users } from './Users';
 import { Adjustments } from './Adjustments';
+import { Invoices } from './Invoices';
 import type { WriterStatusDto } from '../../core/types';
 import { Reconciliation } from './Reconciliation';
 import { Params } from './Params';
@@ -146,7 +147,7 @@ function Dashboard({ cfg, me, onLogout }: { cfg: PublicConfigDto; me: MeDto; onL
   const [tab, setTab] = useState<'results' | 'issues'>('results');
   const [writer, setWriter] = useState<WriterStatusDto | null>(null);
   useEffect(() => { api.writerStatus().then(setWriter).catch(() => undefined); }, []);
-  const [section, setSection] = useState<'import' | 'recon' | 'adjust' | 'params' | 'users'>('import');
+  const [section, setSection] = useState<'import' | 'recon' | 'adjust' | 'invoices' | 'params' | 'users'>('import');
   const cancel = useRef(false);
 
   const refreshRuns = useCallback(async () => setRuns((await api.listRuns()).runs), []);
@@ -255,11 +256,13 @@ function Dashboard({ cfg, me, onLogout }: { cfg: PublicConfigDto; me: MeDto; onL
         <button aria-current={section === 'import' ? 'page' : undefined} onClick={() => setSection('import')} data-testid="nav-import">Importar autorizaciones</button>
         <button aria-current={section === 'recon' ? 'page' : undefined} onClick={() => setSection('recon')} data-testid="nav-recon">Conciliación</button>
         {has('adjustments.view') && <button aria-current={section === 'adjust' ? 'page' : undefined} onClick={() => setSection('adjust')} data-testid="nav-adjust">Ajustes</button>}
+        {has('invoices.manage') && <button aria-current={section === 'invoices' ? 'page' : undefined} onClick={() => setSection('invoices')} data-testid="nav-invoices">Facturación</button>}
         {has('params.view') && <button aria-current={section === 'params' ? 'page' : undefined} onClick={() => setSection('params')} data-testid="nav-params">Parámetros</button>}
         {has('users.manage') && <button aria-current={section === 'users' ? 'page' : undefined} onClick={() => setSection('users')} data-testid="nav-users">Usuarios</button>}
       </nav>
       {section === 'recon' && <main><Reconciliation cfg={cfg} me={me} /></main>}
       {section === 'adjust' && has('adjustments.view') && <main><Adjustments cfg={cfg} me={me} writer={writer} onWriter={setWriter} /></main>}
+      {section === 'invoices' && has('invoices.manage') && <main><Invoices me={me} /></main>}
       {section === 'params' && has('params.view') && <main><Params readOnly={!has('params.edit')} /></main>}
       {section === 'users' && has('users.manage') && <main><Users me={me} /></main>}
       <main hidden={section !== 'import'}>

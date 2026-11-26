@@ -223,8 +223,13 @@ Tras una conciliación completada, **un solo flujo con confirmación humana** ap
 - **Por propuesta, en orden**: aprobar (como el actor; evento y auditoría `assisted`) → ensayo → si pasa todas las comprobaciones, aplicar con el escritor configurado. Respeta modo del escritor, lista de remesas permitidas (el modo asistido NO la amplía), `REHEARSAL_REQUIRED`, cuenta de ajustes y verificación en Home_111.
 - **Paradas**: ensayo fallido o rechazo previo a grabar → se **omite** (nada se escribió) y sigue. `uncertain`, `verification_failed`, `failed` tras grabar, o error de infraestructura/inesperado → la corrida se **DETIENE** (`halted`) y el resto queda pendiente sin tocar; se reanuda de forma explícita (`resume`), omitiendo lo detenido. Una sola corrida activa; lease de 90 s; si el navegador se cierra, la corrida queda reanudable y lo ya aplicado no se repite (`applyProposal` es idempotente).
 - **Permisos**: `adjustments.approve` y `adjustments.apply` (admin y facturación). Auditoría: `assisted.plan/start/approve/halt/resume/finish/export`.
-- **Reporte** (pantalla y `.xlsx`: Resumen, Aplicadas con antes→después y reversa, Omitidas y detenidas, Excluidas del plan por categoría) con la línea «Facturación: pendiente (fase 4, no implementada)».
+- **Reporte** (pantalla y `.xlsx`: Resumen, Aplicadas con antes→después y reversa, Omitidas y detenidas, Excluidas del plan por categoría) con la indicación de que la facturación se hace en la pestaña «Facturación».
 - Tablas `assisted_runs` y `assisted_run_items` (migración `0011_assisted_runs.sql`). El interruptor anterior «aplicación automática» queda como reservado (no implementado).
+
+## Fase 4a — Facturación (SIN emisión real)
+- Pestaña «Facturación» (admin y facturación): plan de remesas elegibles (conciliación EXACTA o ajuste aplicado y verificado, CUMPLIDO, sin factura, Terpel, volumen > 0, datos completos), todas marcadas; «Facturar todas (N)» = UNA factura por remesa, por pasos, con progreso, parada ante resultado incierto y reporte `.xlsx`; «Facturar esta» por remesa.
+- Escritor simulado por defecto (banner «MODO SIMULADO»). El escritor real (`SilogtranWebInvoiceWriter`) solo emite con modo `web`, remesa en la lista permitida, ensayo vigente y confirmación; «Facturar todas» real requiere `batch_enabled`. **Ninguna factura real se ha emitido.**
+- Migración `0012_invoicing.sql`; detalle, mapa de la pantalla Automatica_111, regla crítica y pendientes por confirmar en [`docs/silogtran-facturacion.md`](docs/silogtran-facturacion.md).
 
 ## Variables de entorno
 
