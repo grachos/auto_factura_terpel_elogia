@@ -164,7 +164,13 @@ function closestByDate(cands: SilogCandidate[], serviceDate: string | null): Sil
 
 /** Cascada de filtros. `base` ya excluye ANULADO y clientes distintos de Terpel. */
 export function reconcile(t: TerpelInput, base: SilogCandidate[], p: EngineParams, manualId?: string | null): EngineResult {
-  return markWeak(t, base, reconcileTop(t, base, p, manualId), manualId);
+  const top = reconcileTop(t, base, p, manualId);
+  // Asignación manual de un registro que los filtros no alcanzan (p. ej. otro conductor): decisión humana; se calcula con las reglas de siempre.
+  if (manualId && (top.status === 'NO_MATCH' || (top.status === 'INSUFFICIENT_DATA' && top.reasonCode === 'MISSING_DATA'))) {
+    const chosen = base.find((c) => c.id === manualId);
+    if (chosen) return { ...classifySingle(t, chosen, [], [], 'Remesa asignada manualmente', p.zeroVolumeMode ?? 'ignore'), candidateIds: [chosen.id] };
+  }
+  return markWeak(t, base, top, manualId);
 }
 
 /**

@@ -40,7 +40,7 @@ import { sqlState } from '../db/types.js';
 import { generateReconExport } from '../recon/excel.js';
 import {
   addAliasAndReconcile, createReconRun, deleteAlias, getParams, getReconDetail, getReconRun, isUuid, listReconRuns, listResults, loadAliases,
-  resolveResult, saveFilters, saveSettings, stepReconRun, syncStep, upsertAlias,
+  assignManual, manualCandidates, resolveResult, saveFilters, unassignManual, saveSettings, stepReconRun, syncStep, upsertAlias,
 } from '../recon/service.js';
 import type { MatchFilterDto, ReconSettingsDto } from '../types.js';
 
@@ -683,6 +683,19 @@ async function dispatchRecon(
     if (c === 'resolve' && is('POST', '/reconciliation-results/:id/resolve')) {
       requirePermission(session, 'recon.resolve');
       return ok(await resolveResult(ctx.db, session.userId, id(b), asObject(req.body).recordId));
+    }
+    if (c === 'manual-candidates' && is('GET', '/reconciliation-results/:id/manual-candidates')) {
+      requirePermission(session, 'recon.resolve');
+      return ok({ candidates: await manualCandidates(ctx.db, id(b), req.query.q, ctx.config.silog.terpelNit) });
+    }
+    if (c === 'assign' && is('POST', '/reconciliation-results/:id/assign')) {
+      requirePermission(session, 'recon.resolve');
+      const body = asObject(req.body);
+      return ok(await assignManual(ctx.db, session.userId, id(b), { recordId: body.recordId, reason: body.reason, reassign: body.reassign }, ctx.config.silog.terpelNit));
+    }
+    if (c === 'unassign' && is('POST', '/reconciliation-results/:id/unassign')) {
+      requirePermission(session, 'recon.resolve');
+      return ok(await unassignManual(ctx.db, session.userId, id(b)));
     }
     if (c === 'alias' && is('POST', '/reconciliation-results/:id/alias')) {
       requirePermission(session, 'params.edit');

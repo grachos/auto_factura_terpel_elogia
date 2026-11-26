@@ -212,7 +212,10 @@ export interface ReconResultDto {
   manual: boolean;
   resolvedBy: string | null;
   resolvedAt: string | null;
+  resolvedNote: string | null;
 }
+
+export interface ManualCandidateDto extends SilogRecordDto { assignedTo: string | null; suggested: boolean }
 
 export interface MatchFilterDto {
   key: FilterKeyDto;

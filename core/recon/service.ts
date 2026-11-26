@@ -5,6 +5,7 @@ import { AppError } from '../errors.js';
 import { log } from '../logger.js';
 import type { StorageAdapter } from '../storage/types.js';
 import type {
+  ManualCandidateDto,
   DifferenceDto, FilterKeyDto, FilterModeDto, MatchFilterDto, PlaceAliasDto, ReconParamsDto, ReconResultDto, ReconRunDetailDto,
   ReconRunDto, ReconSettingsDto, ReconStatus, ReconStepDto, SilogRecordDto, TraceStepDto,
 } from '../types.js';
@@ -321,6 +322,13 @@ interface ServiceRow {
   resolved_record_id: string | null; prev_authorization_id: string | null;
 }
 
+async function loadCandidateById(q: Queryable, id: string): Promise<SilogCandidate | null> {
+  const r = await q.query<CandRow>(
+    `select id, to_char(dispatch_date,'YYYY-MM-DD') as dispatch_date, plate_normalized, driver_document, origin_city, destination_city, remesa_weight::text as remesa_weight, total_remesa::text as total_remesa from silogtran_records where id = $1`, [id]);
+  const c = r.rows[0];
+  return c ? { id: c.id, dispatchDate: c.dispatch_date, plateNormalized: c.plate_normalized, driverDocument: c.driver_document, originCity: c.origin_city, destinationCity: c.destination_city, remesaWeight: c.remesa_weight, totalRemesa: c.total_remesa } : null;
+}
+
 const SERVICE_SELECT = `
   select s.id as service_id, a.id as authorization_id, a.transport_number, to_char(a.service_date,'YYYY-MM-DD') as service_date, a.driver_code, a.route,
          a.plate_normalized, a.transport_volume::text as transport_volume, a.net_value::text as net_value,
@@ -355,7 +363,12 @@ async function reconcileRows(tx: Queryable, runId: string, rows: ServiceRow[], p
       transportVolume: s.transport_volume, netValue: s.net_value,
     };
     const manualId = s.prev_authorization_id === s.authorization_id ? s.resolved_record_id : null;
-    const res = reconcile(t, candidates, params, manualId);
+    let cands = candidates;
+    if (manualId && !candidates.some((c) => c.id === manualId)) {
+      const extra = await loadCandidateById(tx, manualId);
+      if (extra) cands = [...candidates, extra];
+    }
+    const res = reconcile(t, cands, params, manualId);
     await tx.query(
       `insert into reconciliation_results (service_id, run_id, authorization_id, transport_number, service_date, status, chosen_record_id,
          candidate_ids, filter_trace, differences, reason, rules_version, computed_at, reason_code, weight_source)
@@ -470,7 +483,7 @@ export async function stepReconRun(deps: ReconDeps, runId: string, actor: string
 interface ResultRow {
   id: string; transport_number: string; service_date: string; status: ReconStatus; reason: string | null; reason_code: string | null; weight_source: 'terpel' | 'silogtran' | null; rules_version: string;
   chosen_record_id: string | null; candidate_ids: string[]; filter_trace: TraceStepDto[]; differences: DifferenceDto[];
-  resolved_record_id: string | null; resolved_by: string | null; resolved_at: Date | null;
+  resolved_record_id: string | null; resolved_by: string | null; resolved_at: Date | null; resolved_note: string | null;
   route: string | null; plate: string | null; driver_code: string | null; driver_name: string | null; volume: string | null; net_value: string | null;
 }
 
@@ -492,7 +505,7 @@ function recDto(r: RecRow): SilogRecordDto {
 
 const RESULT_SELECT = `
   select r.id, r.transport_number, to_char(r.service_date,'YYYY-MM-DD') as service_date, r.status, r.reason, r.reason_code, r.weight_source, r.rules_version,
-         r.chosen_record_id, r.candidate_ids, r.filter_trace, r.differences, r.resolved_record_id, r.resolved_by, r.resolved_at,
+         r.chosen_record_id, r.candidate_ids, r.filter_trace, r.differences, r.resolved_record_id, r.resolved_by, r.resolved_at, r.resolved_note,
          a.route, a.plate, a.driver_code, a.driver_name, a.transport_volume::text as volume, a.net_value::text as net_value
     from reconciliation_results r join authorizations a on a.id = r.authorization_id`;
 
@@ -519,7 +532,7 @@ async function toResultDtos(q: Queryable, rows: ResultRow[]): Promise<ReconResul
     silog: r.chosen_record_id ? (recs.get(r.chosen_record_id) ?? null) : null,
     candidates: r.candidate_ids.map((c) => recs.get(c)).filter((x): x is SilogRecordDto => !!x),
     trace: r.filter_trace, differences: r.differences,
-    manual: r.resolved_record_id !== null, resolvedBy: r.resolved_by, resolvedAt: r.resolved_at ? new Date(r.resolved_at).toISOString() : null,
+    manual: r.resolved_record_id !== null, resolvedBy: r.resolved_by, resolvedAt: r.resolved_at ? new Date(r.resolved_at).toISOString() : null, resolvedNote: r.resolved_note,
   }));
 }
 
@@ -574,6 +587,87 @@ export async function resolveResult(db: Db, actor: string, resultId: string, rec
   await db.query('update reconciliation_results set resolved_record_id=$2, resolved_by=$3, resolved_at=now() where id=$1', [resultId, recordId, actor]);
   await reconcileOne(db, resultId);
   await audit(db, actor, 'reconciliation.resolve', 'reconciliation_result', resultId, { recordId });
+  return getResult(db, resultId);
+}
+
+// ---- Asignación manual de una remesa a un servicio sin coincidencia ----------------------------------------
+const MANUAL_STATUSES = ['NO_MATCH', 'INSUFFICIENT_DATA'];
+
+/** Busca registros asignables (CUMPLIDO, Terpel, sin factura). Con `q` busca por remesa o manifiesto; sin `q` sugiere por placa/ruta/fecha. */
+export async function manualCandidates(db: Db, resultId: string, q: unknown, terpelNit: string): Promise<ManualCandidateDto[]> {
+  const cur = await db.query<{ plate: string | null; service_date: string; route: string | null }>(
+    `select a.plate_normalized as plate, to_char(a.service_date,'YYYY-MM-DD') as service_date, a.route from reconciliation_results r join authorizations a on a.id = r.authorization_id where r.id = $1`, [resultId]);
+  const t = cur.rows[0];
+  if (!t) throw new AppError(404, 'NOT_FOUND', 'Resultado no encontrado');
+  const term = typeof q === 'string' ? q.trim().slice(0, 40) : '';
+  const params: unknown[] = [(await loadSettings(db, terpelNit)).terpelNit.replace(/\D+/g, '')];
+  let where = `s.client_nit = $1 and upper(coalesce(s.status,'')) = 'CUMPLIDO' and coalesce(s.invoice,'') = ''`;
+  let order = 's.dispatch_date desc';
+  if (term) {
+    params.push(`%${term.replace(/[%_]/g, '')}%`);
+    where += ` and (s.remesa_code ilike $2 or s.manifest ilike $2)`;
+  } else {
+    params.push(t.service_date, t.plate ?? '');
+    where += ` and s.dispatch_date between ($2::date - 20) and ($2::date + 3)`;
+    order = `(s.plate_normalized = $3) desc, abs(s.dispatch_date - $2::date) asc`;
+  }
+  const rows = await db.query<RecRow & { assigned_to: string | null; plate_n: string | null }>(
+    `select s.id, s.manifest, s.remesa_code, to_char(s.dispatch_date,'YYYY-MM-DD') as dispatch_date, to_char(s.delivery_date,'YYYY-MM-DD') as delivery_date, s.plate,
+            s.driver_name, s.driver_document, s.origin_city, s.destination_city, s.remesa_weight::text as remesa_weight, s.net_load_weight::text as net_load_weight, s.rate::text as rate,
+            s.total_remesa::text as total_remesa, s.status, s.remesa_status, s.invoice, s.plate_normalized as plate_n,
+            (select r2.transport_number from reconciliation_results r2 where r2.chosen_record_id = s.id and r2.status in ('EXACT','MATCH_WITH_DIFFERENCES') and r2.id <> $${params.length + 1} limit 1) as assigned_to
+       from silogtran_records s where ${where} order by ${order} limit 25`, [...params, resultId]);
+  return rows.rows.map((r) => ({ ...recDto(r), assignedTo: r.assigned_to, suggested: !term && !!t.plate && r.plate_n === t.plate }));
+}
+
+/** Asigna a mano un registro a un servicio sin coincidencia. Un registro ya asignado a otro servicio solo se reasigna con `reassign` explícito. */
+export async function assignManual(db: Db, actor: string, resultId: string, input: { recordId: unknown; reason: unknown; reassign?: unknown }, terpelNit: string): Promise<ReconResultDto> {
+  if (!isUuid(typeof input.recordId === 'string' ? input.recordId : undefined)) throw new AppError(400, 'INVALID_FIELD', 'Campo inválido: recordId');
+  const reason = typeof input.reason === 'string' ? input.reason.trim() : '';
+  if (reason.length < 3 || reason.length > 200) throw new AppError(400, 'INVALID_FIELD', 'Indique el motivo de la asignación (3 a 200 caracteres)');
+  const recordId = input.recordId as string;
+  const nit = (await loadSettings(db, terpelNit)).terpelNit;
+  const cur = await db.query<{ status: string; reason_code: string | null; transport_number: string }>('select status, reason_code, transport_number from reconciliation_results where id=$1', [resultId]);
+  const r = cur.rows[0];
+  if (!r) throw new AppError(404, 'NOT_FOUND', 'Resultado no encontrado');
+  if (!MANUAL_STATUSES.includes(r.status) || (r.status === 'INSUFFICIENT_DATA' && r.reason_code !== 'MISSING_DATA')) {
+    throw new AppError(409, 'NOT_ASSIGNABLE', 'Solo se asigna a mano un servicio sin coincidencia (o con datos faltantes en Terpel); el volumen 0 espera corrección de Terpel');
+  }
+  const rec = await db.query<{ status: string | null; client_nit: string | null; invoice: string | null; remesa_code: string }>('select status, client_nit, invoice, remesa_code from silogtran_records where id=$1', [recordId]);
+  const x = rec.rows[0];
+  if (!x) throw new AppError(404, 'RECORD_NOT_FOUND', 'Registro de Silogtran no encontrado');
+  if ((x.status ?? '').toUpperCase() !== 'CUMPLIDO') throw new AppError(409, 'RECORD_NOT_CUMPLIDO', 'El registro no está CUMPLIDO');
+  if ((x.client_nit ?? '').replace(/\D+/g, '') !== nit.replace(/\D+/g, '')) throw new AppError(409, 'RECORD_NOT_TERPEL', 'El registro no es de Terpel');
+  if ((x.invoice ?? '') !== '') throw new AppError(409, 'RECORD_INVOICED', `El registro ya tiene factura (${x.invoice})`);
+  const other = await db.query<{ id: string; transport_number: string }>(
+    `select id, transport_number from reconciliation_results where chosen_record_id = $1 and id <> $2 and status in ('EXACT','MATCH_WITH_DIFFERENCES')`, [recordId, resultId]);
+  if (other.rows.length > 0 && input.reassign !== true) {
+    throw new AppError(409, 'RECORD_ASSIGNED', `La remesa ${x.remesa_code} ya está asignada al transporte ${other.rows.map((o) => o.transport_number).join(', ')}. Confirme la reasignación para quitársela`, { transports: other.rows.map((o) => o.transport_number) });
+  }
+  await db.transaction(async (tx) => {
+    for (const o of other.rows) {
+      await tx.query(
+        `update reconciliation_results set status='NO_MATCH', chosen_record_id=null, candidate_ids='{}', reason=$2, reason_code='RECORD_REASSIGNED', weight_source=null, differences='[]'::jsonb,
+           resolved_record_id = case when resolved_record_id = $3 then null else resolved_record_id end where id=$1`,
+        [o.id, `La remesa ${x.remesa_code} se reasignó manualmente al transporte ${r.transport_number} (${actor})`, recordId],
+      );
+      await audit(tx, actor, 'reconciliation.manual_reassign_from', 'reconciliation_result', o.id, { recordId, to: resultId });
+    }
+    await tx.query('update reconciliation_results set resolved_record_id=$2, resolved_by=$3, resolved_at=now(), resolved_note=$4 where id=$1', [resultId, recordId, actor, reason]);
+  });
+  await reconcileOne(db, resultId);
+  await audit(db, actor, 'reconciliation.manual_assign', 'reconciliation_result', resultId, { recordId, reason, reassigned: other.rows.length });
+  return getResult(db, resultId);
+}
+
+/** Quita la asignación manual: el servicio se concilia de nuevo con las reglas de siempre (puede volver a NO_MATCH). */
+export async function unassignManual(db: Db, actor: string, resultId: string): Promise<ReconResultDto> {
+  const cur = await db.query<{ resolved_record_id: string | null }>('select resolved_record_id from reconciliation_results where id=$1', [resultId]);
+  if (!cur.rows[0]) throw new AppError(404, 'NOT_FOUND', 'Resultado no encontrado');
+  if (!cur.rows[0].resolved_record_id) throw new AppError(409, 'NOT_MANUAL', 'Este resultado no tiene una elección manual');
+  await db.query('update reconciliation_results set resolved_record_id=null, resolved_by=null, resolved_at=null, resolved_note=null where id=$1', [resultId]);
+  await reconcileOne(db, resultId);
+  await audit(db, actor, 'reconciliation.manual_unassign', 'reconciliation_result', resultId, {});
   return getResult(db, resultId);
 }
 

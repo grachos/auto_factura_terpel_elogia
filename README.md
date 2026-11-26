@@ -227,6 +227,7 @@ Tras una conciliación completada, **un solo flujo con confirmación humana** ap
 - Tablas `assisted_runs` y `assisted_run_items` (migración `0011_assisted_runs.sql`). El interruptor anterior «aplicación automática» queda como reservado (no implementado).
 
 ## Fase 4a — Facturación (SIN emisión real)
+- Asignación manual de remesa a un servicio sin coincidencia (botón en Conciliación; motivo obligatorio, uno a uno, reasignación explícita, quitar asignación). Ver `docs/silogtran-facturacion.md`.
 - Conciliación `recon-1.4.0`: asignación uno a uno (un registro no puede ser de dos servicios) y coincidencia débil por placa ignorada ⇒ revisión manual. Ver `docs/silogtran-facturacion.md`.
 - Pestaña «Facturación» (admin y facturación): plan de remesas elegibles (conciliación EXACTA o ajuste aplicado y verificado, CUMPLIDO, sin factura, Terpel, volumen > 0, datos completos), todas marcadas; «Facturar todas (N)» = UNA factura por remesa, por pasos, con progreso, parada ante resultado incierto y reporte `.xlsx`; «Facturar esta» por remesa.
 - Escritor simulado por defecto (banner «MODO SIMULADO»). El escritor real (`SilogtranWebInvoiceWriter`) solo emite con modo `web`, remesa en la lista permitida, ensayo vigente y confirmación; «Facturar todas» real requiere `batch_enabled`. **Ninguna factura real se ha emitido.**

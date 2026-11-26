@@ -1,7 +1,7 @@
 import type {
   AdjustSettingsDto, ApplyPreviewDto, AssistedPlanDto, AssistedRunDetailDto, AssistedRunDto, ProposalDto, ProposalEventDto, RehearsalDto, WriterStatusDto,
   ApiErrorDto, MailConfigDto, MatchFilterDto, MeDto, PlaceAliasDto, PublicConfigDto, ReconParamsDto, ReconResultDto, ReconRunDetailDto,
-  InvoiceDto, InvoicePlanDto, InvoiceRehearsalDto, InvoiceRunDetailDto, InvoiceRunDto, InvoiceSettingsDto,
+  ManualCandidateDto, InvoiceDto, InvoicePlanDto, InvoiceRehearsalDto, InvoiceRunDetailDto, InvoiceRunDto, InvoiceSettingsDto,
   ReconRunDto, ReconSettingsDto, ReconStepDto, RunDetailDto, RunDto, StepResultDto,
 } from '../../core/types';
 
@@ -120,6 +120,9 @@ export const api = {
   reconDetail: (id: string) => request<ReconRunDetailDto>('GET', `/api/reconciliations/${id}`),
   reconExportUrl: (id: string) => request<{ url: string }>('GET', `/api/reconciliations/${id}/export/url`),
   reconRegenerate: (id: string) => request<{ status: 'ready' | 'failed' }>('POST', `/api/reconciliations/${id}/export`),
+  manualCandidates: (id: string, q: string) => request<{ candidates: ManualCandidateDto[] }>('GET', `/api/reconciliation-results/${id}/manual-candidates${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  assignManual: (id: string, recordId: string, reason: string, reassign = false) => request<ReconResultDto>('POST', `/api/reconciliation-results/${id}/assign`, { recordId, reason, reassign }),
+  unassignManual: (id: string) => request<ReconResultDto>('POST', `/api/reconciliation-results/${id}/unassign`),
   resolveResult: (id: string, recordId: string) => request<ReconResultDto>('POST', `/api/reconciliation-results/${id}/resolve`, { recordId }),
   addAlias: (id: string, silogName: string, terpelName: string) => request<ReconResultDto>('POST', `/api/reconciliation-results/${id}/alias`, { silogName, terpelName }),
   reconParams: () => request<ReconParamsDto>('GET', '/api/recon-params'),

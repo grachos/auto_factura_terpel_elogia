@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { DifferenceDto, MeDto, PublicConfigDto, ReconResultDto, ReconRunDto, TraceStepDto } from '../../core/types';
+import type { DifferenceDto, ManualCandidateDto, MeDto, PublicConfigDto, ReconResultDto, ReconRunDto, TraceStepDto } from '../../core/types';
 import { api, ApiError } from './api';
 
 const STATUS_LABEL: Record<string, string> = {
@@ -54,8 +54,45 @@ function Diffs({ diffs }: { diffs: DifferenceDto[] }) {
   );
 }
 
-function ResultDetail({ r, canWrite, isAdmin, onResolve, onAlias }: {
-  r: ReconResultDto; canWrite: boolean; isAdmin: boolean;
+function ManualAssign({ r, canWrite, onReplace }: { r: ReconResultDto; canWrite: boolean; onReplace: (r: ReconResultDto) => void }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const [list, setList] = useState<ManualCandidateDto[]>([]);
+  const [reason, setReason] = useState('');
+  const [msg, setMsg] = useState<string | null>(null);
+  const search = async (term: string) => { try { setList((await api.manualCandidates(r.id, term)).candidates); setMsg(null); } catch (e) { setMsg(errMsg(e)); } };
+  const assign = async (c: ManualCandidateDto) => {
+    let reassign = false;
+    if (c.assignedTo) {
+      if (!window.confirm(`La remesa ${c.remesaCode} ya está asignada al transporte ${c.assignedTo}. ¿Reasignarla a este servicio? Aquel quedará sin coincidencia.`)) return;
+      reassign = true;
+    }
+    try { onReplace(await api.assignManual(r.id, c.id, reason, reassign)); setOpen(false); } catch (e) { setMsg(errMsg(e)); }
+  };
+  return (
+    <div data-testid="manual-assign" style={{ marginTop: '.5rem' }}>
+      {!open ? <button disabled={!canWrite} onClick={() => { setOpen(true); void search(''); }} data-testid="manual-open">Asignar remesa manualmente</button> : (
+        <>
+          <h3>Asignar remesa manualmente</h3>
+          <div className="row">
+            <label>Remesa o manifiesto<input value={q} onChange={(e) => setQ(e.target.value)} data-testid="manual-q" /></label>
+            <button onClick={() => void search(q)} data-testid="manual-search">Buscar</button>
+            <label>Motivo (obligatorio)<input value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} data-testid="manual-reason" /></label>
+          </div>
+          {msg && <div className="alert warn" data-testid="manual-msg">{msg}</div>}
+          <table data-testid="manual-candidates"><thead><tr><th>Manifiesto/Remesa</th><th>Despacho</th><th>Placa</th><th>Total</th><th>Asignada a</th><th /></tr></thead>
+            <tbody>{list.map((c) => (
+              <tr key={c.id}><td className="mono">{c.manifest}/{c.remesaCode}</td><td>{c.dispatchDate}</td><td>{c.plate}{c.suggested ? ' ★' : ''}</td><td className="mono">{fmt(c.totalRemesa)}</td><td>{c.assignedTo ?? '—'}</td>
+                <td><button disabled={reason.trim().length < 3} onClick={() => void assign(c)} data-testid="manual-pick">Asignar</button></td></tr>
+            ))}{list.length === 0 && <tr><td colSpan={6} className="muted">Sin registros CUMPLIDO de Terpel sin factura.</td></tr>}</tbody></table>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ResultDetail({ r, canWrite, isAdmin, onResolve, onAlias, onReplace }: {
+  r: ReconResultDto; canWrite: boolean; isAdmin: boolean; onReplace: (r: ReconResultDto) => void;
   onResolve: (resultId: string, recordId: string) => void; onAlias: (resultId: string, silog: string, terpel: string) => void;
 }) {
   const [silogName, setSilogName] = useState('');
@@ -69,7 +106,8 @@ function ResultDetail({ r, canWrite, isAdmin, onResolve, onAlias }: {
         <Trace trace={r.trace} />
         <h3 style={{ marginTop: '.75rem' }}>Diferencias</h3>
         <Diffs diffs={r.differences} />
-        {r.manual && <p className="muted">Elegido manualmente por {r.resolvedBy} el {r.resolvedAt ? new Date(r.resolvedAt).toLocaleString('es-CO') : ''}.</p>}
+        {r.manual && <p className="muted" data-testid="manual-note">Asignada manualmente por {r.resolvedBy} el {r.resolvedAt ? new Date(r.resolvedAt).toLocaleString('es-CO') : ''}{r.resolvedNote ? `: ${r.resolvedNote}` : ''}.{' '}
+          {canWrite && <button onClick={async () => { try { onReplace(await api.unassignManual(r.id)); } catch { /* sin permiso */ } }} data-testid="manual-remove">Quitar asignación manual</button>}</p>}
       </div>
       <div>
         <h3>Silogtran (referencia)</h3>
@@ -80,6 +118,7 @@ function ResultDetail({ r, canWrite, isAdmin, onResolve, onAlias }: {
             Factura: {r.silog.invoice ? `ya tiene (${r.silog.invoice})` : 'no tiene'}
           </p>
         ) : <p className="muted">Sin registro elegido.</p>}
+        {(r.status === 'NO_MATCH' || (r.status === 'INSUFFICIENT_DATA' && r.reasonCode === 'MISSING_DATA')) && <ManualAssign r={r} canWrite={canWrite} onReplace={onReplace} />}
         {r.status === 'AMBIGUOUS' && (
           <>
             <h3>Candidatos</h3>
@@ -273,7 +312,7 @@ export function Reconciliation({ cfg, me }: { cfg: PublicConfigDto; me: MeDto })
                 </thead>
                 <tbody>
                   {visible.map((r) => (
-                    <FragmentRow key={r.id} r={r} open={open === r.id} toggle={() => setOpen(open === r.id ? null : r.id)} canWrite={canWrite} isAdmin={isAdmin} onResolve={onResolve} onAlias={onAlias} />
+                    <FragmentRow key={r.id} r={r} open={open === r.id} toggle={() => setOpen(open === r.id ? null : r.id)} canWrite={canWrite} isAdmin={isAdmin} onResolve={onResolve} onAlias={onAlias} onReplace={replace} />
                   ))}
                   {visible.length === 0 && <tr><td colSpan={8} className="muted">Sin resultados para este filtro.</td></tr>}
                 </tbody>
@@ -310,7 +349,8 @@ export function Reconciliation({ cfg, me }: { cfg: PublicConfigDto; me: MeDto })
   );
 }
 
-function FragmentRow({ r, open, toggle, canWrite, isAdmin, onResolve, onAlias }: {
+function FragmentRow({ r, open, toggle, canWrite, isAdmin, onResolve, onAlias, onReplace }: {
+  onReplace: (r: ReconResultDto) => void;
   r: ReconResultDto; open: boolean; toggle: () => void; canWrite: boolean; isAdmin: boolean;
   onResolve: (a: string, b: string) => void; onAlias: (a: string, b: string, c: string) => void;
 }) {
@@ -330,7 +370,7 @@ function FragmentRow({ r, open, toggle, canWrite, isAdmin, onResolve, onAlias }:
         <td data-testid="recon-weight-source">{r.weightSource === 'terpel' ? 'Terpel' : r.weightSource === 'silogtran' ? 'Silogtran' : '—'}</td>
         <td className="wrap">{r.differences.filter((d) => d.severity === 'adjustable').map((d) => FIELD_LABEL[d.field] ?? d.field).join(', ') || '—'}</td>
       </tr>
-      {open && <tr className="detail"><td colSpan={8}><ResultDetail r={r} canWrite={canWrite} isAdmin={isAdmin} onResolve={onResolve} onAlias={onAlias} /></td></tr>}
+      {open && <tr className="detail"><td colSpan={8}><ResultDetail r={r} canWrite={canWrite} isAdmin={isAdmin} onResolve={onResolve} onAlias={onAlias} onReplace={onReplace} /></td></tr>}
     </>
   );
 }
