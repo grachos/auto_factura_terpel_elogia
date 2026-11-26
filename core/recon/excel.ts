@@ -53,7 +53,7 @@ export const RECON_COLUMNS: Col[] = [
   { header: 'Cédula/código conductor (Terpel)', type: 'text', width: 16, value: (r) => r.terpel.driverCode },
   { header: 'Volumen galones (Terpel)', type: 'dec4', width: 16, value: (r) => num(r.terpel.volume) },
   { header: 'Valor neto (Terpel)', type: 'dec4', width: 16, value: (r) => num(r.terpel.netValue) },
-  { header: 'Estado', type: 'text', width: 24, value: (r) => STATUS_LABEL[r.status] ?? r.status },
+  { header: 'Estado', type: 'text', width: 24, value: (r) => (r.status === 'EXACT' && r.differences.length > 0 ? 'Exacto con novedad' : STATUS_LABEL[r.status] ?? r.status) },
   { header: 'Manifiesto (Silogtran)', type: 'text', width: 14, value: (r) => r.silog?.manifest ?? null },
   { header: 'Remesa (Silogtran)', type: 'text', width: 12, value: (r) => r.silog?.remesaCode ?? null },
   { header: 'Fecha despacho (Silogtran)', type: 'date', width: 14, value: (r) => r.silog?.dispatchDate ?? null },

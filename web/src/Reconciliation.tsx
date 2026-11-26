@@ -18,8 +18,8 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const fmt = (v: string | number | null | undefined): string =>
   v === null || v === undefined || v === '' ? '—' : Number.isFinite(Number(v)) ? Number(v).toLocaleString('es-CO', { maximumFractionDigits: 2 }) : String(v);
 
-function Badge({ value }: { value: string }) {
-  return <span className={`badge ${value}`}>{STATUS_LABEL[value] ?? value}</span>;
+function Badge({ value, label }: { value: string; label?: string }) {
+  return <span className={`badge ${value}`}>{label ?? STATUS_LABEL[value] ?? value}</span>;
 }
 
 function Trace({ trace }: { trace: TraceStepDto[] }) {
@@ -365,7 +365,12 @@ function FragmentRow({ r, open, toggle, canWrite, isAdmin, onResolve, onAlias, o
             ? `${r.silog.manifest} · ${r.silog.dispatchDate ?? '—'} · ${r.silog.plate ?? '—'} · ${fmt(r.silog.remesaWeight)} · ${fmt(r.silog.totalRemesa)}`
             : r.status === 'AMBIGUOUS' ? `${r.candidates.length} candidatos` : '—'}
         </td>
-        <td><Badge value={r.status} />{r.manual && <span className="muted"> (manual)</span>}</td>
+        <td>
+          {r.status === 'EXACT' && r.differences.length > 0
+            ? <><Badge value="EXACT" label="Exacto con novedad" /><span className="muted" data-testid="recon-novelty"> ({r.differences.map((d) => FIELD_LABEL[d.field] ?? FILTER_LABEL[d.field] ?? d.field).join(', ')})</span></>
+            : <Badge value={r.status} />}
+          {r.manual && <span className="muted"> (manual)</span>}
+        </td>
         <td className="wrap" data-testid="recon-reason">{r.reasonCode ? `${r.reasonCode}: ` : ''}{r.status === 'INSUFFICIENT_DATA' || r.reasonCode ? r.reason : '—'}</td>
         <td data-testid="recon-weight-source">{r.weightSource === 'terpel' ? 'Terpel' : r.weightSource === 'silogtran' ? 'Silogtran' : '—'}</td>
         <td className="wrap">{r.differences.filter((d) => d.severity === 'adjustable').map((d) => FIELD_LABEL[d.field] ?? d.field).join(', ') || '—'}</td>
