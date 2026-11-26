@@ -63,14 +63,14 @@ export function validateObservationTemplate(t: unknown): string {
   return s;
 }
 
-/** Producto para la observación: mayúsculas y SIN guiones («B-100» → «B100»). PENDIENTE DE CONFIRMAR con el negocio (ver docs/silogtran-facturacion.md). */
-export const normalizeProduct = (raw: string | null | undefined): string => (raw ?? '').toUpperCase().replace(/-/g, '').replace(/\s+/g, ' ').trim();
+/** Producto TAL CUAL lo muestra la consulta de la remesa (Home_111): solo se recortan los espacios extremos y se colapsan los múltiples. NO se tocan guiones ni mayúsculas. */
+export const cleanProduct = (raw: string | null | undefined): string => (raw ?? '').replace(/\s+/g, ' ').trim();
 
 /** Observación en mayúsculas con espacios simples; se trunca a 176 caracteres en límite de palabra (devuelve el aviso). */
 export function renderObservation(template: string, v: { product: string; origin: string; destination: string; transport: string; serviceEntrySheet: string | null; remesa: string }): { text: string; truncated: boolean } {
-  const full = template
-    .replace(/\{product\}/g, v.product).replace(/\{origin\}/g, v.origin).replace(/\{destination\}/g, v.destination).replace(/\{transport\}/g, v.transport)
-    .replace(/\{serviceEntrySheet\}/g, v.serviceEntrySheet ?? '').replace(/\{remesa\}/g, v.remesa).toUpperCase().replace(/\s+/g, ' ').trim();
+  const val: Record<string, string> = { product: v.product, origin: v.origin.toUpperCase(), destination: v.destination.toUpperCase(), transport: v.transport.toUpperCase(), serviceEntrySheet: (v.serviceEntrySheet ?? '').toUpperCase(), remesa: v.remesa };
+  // El texto fijo de la plantilla va en mayúsculas; el producto se inserta verbatim.
+  const full = template.split(/(\{[^}]*\})/).map((part) => (/^\{[^}]*\}$/.test(part) ? (val[part.slice(1, -1)] ?? '') : part.toUpperCase())).join('').replace(/\s+/g, ' ').trim();
   if (full.length <= MAX_OBSERVATION) return { text: full, truncated: false };
   const cut = full.slice(0, MAX_OBSERVATION);
   const sp = cut.lastIndexOf(' ');
@@ -79,26 +79,26 @@ export function renderObservation(template: string, v: { product: string; origin
 
 interface SettingsRow {
   cost_center: string; client: string; printable_name: string; seller: string; payment_days: number; payment_city: string; currency: string; payment_method: string;
-  invoice_type: string; divide: 'SI' | 'NO'; max_remesas: number; withholding_percent: string; product: string; observation_template: string; writer_mode: 'mock' | 'web' | null;
+  invoice_type: string; divide: 'SI' | 'NO'; max_remesas: number; withholding_percent: string; observation_template: string; writer_mode: 'mock' | 'web' | null;
   writer_allowlist: string[]; writer_allow_all: boolean; batch_enabled: boolean;
 }
 
 export const DEFAULT_INVOICE_SETTINGS: InvoiceSettingsDto = {
   costCenter: 'PRINCIPAL', client: 'ORGANIZACION TERPEL S.A', printableName: 'ORGANIZACION TERPEL S.A', seller: 'CS', paymentDays: 15, paymentCity: 'SANTA MARTA', currency: 'PESOS',
-  paymentMethod: 'CUENTA CORRIENTE', invoiceType: 'CLIENTES', divide: 'NO', maxRemesas: 30, withholdingPercent: 1, product: 'B100',
+  paymentMethod: 'CUENTA CORRIENTE', invoiceType: 'CLIENTES', divide: 'NO', maxRemesas: 30, withholdingPercent: 1,
   observationTemplate: 'SERVICIO DE TRANSPORTE {product} {origin} - {destination} {transport} {serviceEntrySheet}', writerMode: 'mock', writerAllowlist: [], writerAllowAll: false, batchEnabled: false,
 };
 
 export async function getInvoiceSettings(q: Queryable): Promise<InvoiceSettingsDto> {
   const r = await q.query<SettingsRow>(
     `select cost_center, client, printable_name, seller, payment_days, payment_city, currency, payment_method, invoice_type, divide, max_remesas, withholding_percent::text as withholding_percent,
-            product, observation_template, writer_mode, writer_allowlist, writer_allow_all, batch_enabled from invoice_settings limit 1`,
+            observation_template, writer_mode, writer_allowlist, writer_allow_all, batch_enabled from invoice_settings limit 1`,
   );
   const x = r.rows[0];
   if (!x) return DEFAULT_INVOICE_SETTINGS;
   return {
     costCenter: x.cost_center, client: x.client, printableName: x.printable_name, seller: x.seller, paymentDays: x.payment_days, paymentCity: x.payment_city, currency: x.currency,
-    paymentMethod: x.payment_method, invoiceType: x.invoice_type, divide: x.divide, maxRemesas: x.max_remesas, withholdingPercent: Number(x.withholding_percent), product: x.product,
+    paymentMethod: x.payment_method, invoiceType: x.invoice_type, divide: x.divide, maxRemesas: x.max_remesas, withholdingPercent: Number(x.withholding_percent),
     observationTemplate: x.observation_template, writerMode: x.writer_mode ?? 'mock', writerAllowlist: x.writer_allowlist, writerAllowAll: x.writer_allow_all, batchEnabled: x.batch_enabled,
   };
 }
@@ -127,7 +127,7 @@ export async function saveInvoiceSettings(db: Db, actor: string, input: Record<s
     divide: pick('divide', (v) => { if (v !== 'SI' && v !== 'NO') throw new AppError(400, 'INVALID_FIELD', 'Campo inválido: divide'); return v; }, cur.divide),
     maxRemesas: pick('maxRemesas', int('maxRemesas', 1, 100), cur.maxRemesas),
     withholdingPercent: pick('withholdingPercent', (v) => { if (typeof v !== 'number' || !(v >= 0 && v <= 20)) throw new AppError(400, 'INVALID_FIELD', 'Campo inválido: withholdingPercent'); return v; }, cur.withholdingPercent),
-    product: pick('product', (v) => text(v, 'product', 40), cur.product), observationTemplate: pick('observationTemplate', validateObservationTemplate, cur.observationTemplate),
+    observationTemplate: pick('observationTemplate', validateObservationTemplate, cur.observationTemplate),
     writerMode: pick('writerMode', (v) => { if (v !== 'mock' && v !== 'web') throw new AppError(400, 'INVALID_FIELD', 'Campo inválido: writerMode'); return v; }, cur.writerMode),
     writerAllowlist: pick('writerAllowlist', (v) => {
       if (!Array.isArray(v) || v.length > 500) throw new AppError(400, 'INVALID_FIELD', 'Campo inválido: writerAllowlist');
@@ -140,12 +140,12 @@ export async function saveInvoiceSettings(db: Db, actor: string, input: Record<s
   await db.transaction(async (tx) => {
     await tx.query(
       `insert into invoice_settings (id, cost_center, client, printable_name, seller, payment_days, payment_city, currency, payment_method, invoice_type, divide, max_remesas, withholding_percent,
-         product, observation_template, writer_mode, writer_allowlist, writer_allow_all, batch_enabled, updated_by)
-       values (true,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::text[],$17,$18,$19)
+         observation_template, writer_mode, writer_allowlist, writer_allow_all, batch_enabled, updated_by)
+       values (true,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::text[],$16,$17,$18)
        on conflict (id) do update set cost_center=$1, client=$2, printable_name=$3, seller=$4, payment_days=$5, payment_city=$6, currency=$7, payment_method=$8, invoice_type=$9, divide=$10,
-         max_remesas=$11, withholding_percent=$12, product=$13, observation_template=$14, writer_mode=$15, writer_allowlist=$16::text[], writer_allow_all=$17, batch_enabled=$18, updated_by=$19, updated_at=now()`,
+         max_remesas=$11, withholding_percent=$12, observation_template=$13, writer_mode=$14, writer_allowlist=$15::text[], writer_allow_all=$16, batch_enabled=$17, updated_by=$18, updated_at=now()`,
       [next.costCenter, next.client, next.printableName, next.seller, next.paymentDays, next.paymentCity, next.currency, next.paymentMethod, next.invoiceType, next.divide, next.maxRemesas,
-        next.withholdingPercent, next.product, next.observationTemplate, next.writerMode, `{${next.writerAllowlist.join(',')}}`, next.writerAllowAll, next.batchEnabled, actor],
+        next.withholdingPercent, next.observationTemplate, next.writerMode, `{${next.writerAllowlist.join(',')}}`, next.writerAllowAll, next.batchEnabled, actor],
     );
     await audit(tx, actor, 'invoice_settings.update', 'invoice_settings', 'singleton', {
       writerMode: next.writerMode, allowlist: next.writerAllowlist, allowAll: next.writerAllowAll, batchEnabled: next.batchEnabled,
@@ -158,18 +158,18 @@ export async function saveInvoiceSettings(db: Db, actor: string, input: Record<s
 // ---- Filas ---------------------------------------------------------------------------------------------------
 interface InvoiceRow {
   id: string; service_id: string; authorization_id: string; record_id: string | null; remesa_code: string; transport_number: string; plate: string | null; service_date: string;
-  terpel_value: string; observation: string | null; status: InvoiceStatus; review_code: string | null; review_detail: string | null; values_before: Record<string, unknown> | null;
+  terpel_value: string; observation: string | null; product: string | null; status: InvoiceStatus; review_code: string | null; review_detail: string | null; values_before: Record<string, unknown> | null;
   values_after: Record<string, unknown> | null; invoice_number: string | null; account_user: string | null; writer_kind: string | null; simulated: boolean; idempotency_key: string;
   issued_by: string | null; issued_at: Date | null; lease_until: Date | null; last_error: string | null; updated_at: Date;
 }
-const COLS = `id, service_id, authorization_id, record_id, remesa_code, transport_number, plate, to_char(service_date,'YYYY-MM-DD') as service_date, terpel_value::text as terpel_value, observation,
+const COLS = `id, service_id, authorization_id, record_id, remesa_code, transport_number, plate, to_char(service_date,'YYYY-MM-DD') as service_date, terpel_value::text as terpel_value, observation, product,
   status, review_code, review_detail, values_before, values_after, invoice_number, account_user, writer_kind, simulated, idempotency_key, issued_by, issued_at, lease_until, last_error, updated_at`;
 
 const dec = (v: string): string => v.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
 export const toInvoiceDto = (r: InvoiceRow): InvoiceDto => ({
   id: r.id, remesaCode: r.remesa_code, transportNumber: r.transport_number, plate: r.plate, serviceDate: r.service_date, terpelValue: dec(r.terpel_value), expectedFreight: dec(r.terpel_value),
   status: r.status, reviewCode: r.review_code, reviewDetail: r.review_detail, valuesBefore: r.values_before, valuesAfter: r.values_after, invoiceNumber: r.invoice_number,
-  accountUser: r.account_user, writerKind: r.writer_kind, simulated: r.simulated, observation: r.observation, issuedBy: r.issued_by, issuedAt: r.issued_at ? new Date(r.issued_at).toISOString() : null,
+  accountUser: r.account_user, writerKind: r.writer_kind, simulated: r.simulated, observation: r.observation, product: r.product, issuedBy: r.issued_by, issuedAt: r.issued_at ? new Date(r.issued_at).toISOString() : null,
   lastError: r.last_error, updatedAt: new Date(r.updated_at).toISOString(),
 });
 
@@ -191,7 +191,7 @@ export async function addInvoiceEvent(q: Queryable, id: string, actor: string | 
   await q.query(`insert into invoice_events (invoice_id, actor, event, from_status, to_status, simulated, detail) values ($1,$2,$3,$4,$5,$6,$7::jsonb)`, [id, actor, event, from, to, simulated, JSON.stringify(detail)]);
 }
 
-const SETTABLE = new Set(['review_code', 'review_detail', 'values_before', 'values_after', 'invoice_number', 'account_user', 'writer_kind', 'simulated', 'issued_by', 'issued_at', 'lease_until', 'last_error', 'observation']);
+const SETTABLE = new Set(['review_code', 'review_detail', 'values_before', 'values_after', 'invoice_number', 'account_user', 'writer_kind', 'simulated', 'issued_by', 'issued_at', 'lease_until', 'last_error', 'observation', 'product']);
 
 /** Transición atómica (compare-and-set sobre el estado) + evento en la misma transacción. */
 export async function moveInvoice(db: Db, id: string, froms: InvoiceStatus[], to: InvoiceStatus, actor: string | null, event: string, set: Record<string, unknown> = {}, detail: Record<string, unknown> = {}): Promise<InvoiceRow | null> {
@@ -269,7 +269,7 @@ export async function computeInvoicePlan(deps: InvoiceDeps, reconRunId: string):
     if (r.rstatus !== 'EXACT' && r.adj_status !== 'applied') { ex('adjustment_pending', r, r.adj_status ? `ajuste en estado ${r.adj_status}` : 'sin ajuste'); continue; }
     const nv = (r.net_value ?? '').replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
     const home = homes.get(r.remesa_code);
-    const product = normalizeProduct(home && !('error' in home) ? home.producto : null);
+    const product = cleanProduct(home && !('error' in home) ? home.producto : null);
     const missing = [
       !product ? (home && 'error' in home ? `producto (no se pudo leer la consulta: ${home.error})` : 'producto') : null, !(r.origin ?? '').trim() ? 'origen' : null, !(r.destination ?? '').trim() ? 'destino' : null,
       !r.transport_number ? 'número de transporte' : null, !r.entry_sheet ? 'hoja de entrada de servicio' : null, !/^\d+(\.\d+)?$/.test(nv) || Number(nv) <= 0 ? 'valor neto' : null,
@@ -300,18 +300,25 @@ export async function buildInvoicePlan(deps: InvoiceDeps, reconRunId: string, ac
       id = randomUUID();
       await deps.db.transaction(async (tx) => {
         await tx.query(
-          `insert into invoices (id, service_id, authorization_id, recon_result_id, record_id, remesa_code, transport_number, plate, service_date, terpel_value, observation, review_detail, status, idempotency_key, generated_by)
-           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'eligible',$13,$14)`,
-          [id, c.service_id, c.authorization_id, c.rid, c.chosen_record_id, c.remesa_code, c.transport_number, c.plate, c.sd, c.net_value, c.observation, c.warning, key, actor],
+          `insert into invoices (id, service_id, authorization_id, recon_result_id, record_id, remesa_code, transport_number, plate, service_date, terpel_value, observation, product, review_detail, status, idempotency_key, generated_by)
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$15,$12,'eligible',$13,$14)`,
+          [id, c.service_id, c.authorization_id, c.rid, c.chosen_record_id, c.remesa_code, c.transport_number, c.plate, c.sd, c.net_value, c.observation, c.warning, key, actor, c.product],
         );
         await addInvoiceEvent(tx, id as string, actor, 'planned', null, 'eligible', false, { rules: INVOICE_RULES_VERSION });
       });
+    } else if (['eligible', 'rehearsed', 'failed'].includes(ex.rows[0]?.status as string)) {
+      // Refresca observación/producto (p. ej. tras una corrección de reglas); un ensayo previo con otro contenido deja de ser vigente.
+      const cur = await loadInvoice(deps.db, id);
+      if (cur.observation !== c.observation || cur.product !== c.product) {
+        if (cur.status === 'rehearsed') await moveInvoice(deps.db, id, ['rehearsed'], 'eligible', actor, 'replanned', { observation: c.observation, product: c.product, review_detail: c.warning }, { note: 'cambió la observación o el producto: se exige un nuevo ensayo' });
+        else await deps.db.query('update invoices set observation = $2, product = $3, review_detail = $4, updated_at = now() where id = $1', [id, c.observation, c.product, c.warning]);
+      }
     } else if (ex.rows[0]?.status === 'simulated' && deps.writer.kind === 'web') {
       // Una factura SIMULADA no cuenta como emitida: con el escritor real vuelve a ser elegible.
       await moveInvoice(deps.db, id, ['simulated'], 'discarded', actor, 'simulation_discarded', {}, { note: 'simulación descartada al planificar con escritor real' });
-      await moveInvoice(deps.db, id, ['discarded'], 'eligible', actor, 'replanned', { observation: c.observation, invoice_number: null, simulated: false, values_after: null, review_code: null, review_detail: c.warning });
+      await moveInvoice(deps.db, id, ['discarded'], 'eligible', actor, 'replanned', { observation: c.observation, product: c.product, invoice_number: null, simulated: false, values_after: null, review_code: null, review_detail: c.warning });
     } else if (['skipped', 'discarded'].includes(ex.rows[0]?.status as string)) {
-      await moveInvoice(deps.db, id, [ex.rows[0]?.status as InvoiceStatus], 'eligible', actor, 'replanned', { observation: c.observation, review_code: null, review_detail: c.warning });
+      await moveInvoice(deps.db, id, [ex.rows[0]?.status as InvoiceStatus], 'eligible', actor, 'replanned', { observation: c.observation, product: c.product, review_code: null, review_detail: c.warning });
     }
     eligible.push(await getInvoice(deps.db, id));
   }
@@ -325,12 +332,12 @@ async function billingAccount(db: Db): Promise<string | null> {
   return r.rows[0]?.silog_user ?? null;
 }
 
-const hashOf = (r: InvoiceRequest): string => createHash('sha256').update(JSON.stringify([normRemesa(r.remesaCode), r.expectedFreight, r.observation, r.purchaseOrder, r.params])).digest('hex');
+const hashOf = (r: InvoiceRequest): string => createHash('sha256').update(JSON.stringify([normRemesa(r.remesaCode), r.expectedFreight, r.observation, r.purchaseOrder, r.product, r.params])).digest('hex');
 
 async function requestOf(db: Db, row: InvoiceRow): Promise<InvoiceRequest> {
   const s = await getInvoiceSettings(db);
   return {
-    remesaCode: row.remesa_code, transportNumber: row.transport_number, expectedFreight: dec(row.terpel_value), observation: row.observation ?? '', purchaseOrder: row.transport_number, product: normalizeProduct(s.product),
+    remesaCode: row.remesa_code, transportNumber: row.transport_number, expectedFreight: dec(row.terpel_value), observation: row.observation ?? '', purchaseOrder: row.transport_number, product: row.product ?? '',
     params: { costCenter: s.costCenter, client: s.client, printableName: s.printableName, seller: s.seller, paymentDays: s.paymentDays, paymentCity: s.paymentCity, currency: s.currency, paymentMethod: s.paymentMethod, invoiceType: s.invoiceType, divide: s.divide, maxRemesas: s.maxRemesas, withholdingPercent: s.withholdingPercent },
   };
 }

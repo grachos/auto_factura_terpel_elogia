@@ -182,9 +182,9 @@ export function Invoices({ me }: { me: MeDto }) {
       {settings && isAdmin && (
         <section className="card" aria-labelledby="inv-settings" data-testid="invoice-settings">
           <h2 id="inv-settings">Parámetros de facturación (solo administrador)</h2>
-          <p className="muted">La cuenta de facturación se define en Usuarios. Producto sin guiones (B-100 → B100) está PENDIENTE DE CONFIRMAR.</p>
+          <p className="muted">La cuenta de facturación se define en Usuarios. El producto sale de la consulta de la remesa (Home_111) tal cual (p. ej. B-100).</p>
           <div className="grid2">
-            {([['costCenter', 'Centro de costo'], ['client', 'Cliente'], ['seller', 'Vendedor'], ['paymentCity', 'Ciudad de pago'], ['currency', 'Moneda'], ['paymentMethod', 'Forma de pago'], ['invoiceType', 'Tipo de factura'], ['product', 'Producto por defecto']] as const).map(([k, label]) => (
+            {([['costCenter', 'Centro de costo'], ['client', 'Cliente'], ['seller', 'Vendedor'], ['paymentCity', 'Ciudad de pago'], ['currency', 'Moneda'], ['paymentMethod', 'Forma de pago'], ['invoiceType', 'Tipo de factura']] as const).map(([k, label]) => (
               <label key={k}>{label}<input value={settings[k]} onChange={(e) => setSettings({ ...settings, [k]: e.target.value })} data-testid={`invoice-set-${k}`} /></label>
             ))}
             <label>Días de pago<input type="number" value={settings.paymentDays} onChange={(e) => setSettings({ ...settings, paymentDays: Number(e.target.value) })} /></label>

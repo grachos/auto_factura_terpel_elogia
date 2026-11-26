@@ -10,7 +10,7 @@ import { MockInvoiceWriter } from '../core/invoice/writer.js';
 import type { InvoiceOutcome, InvoiceRehearsalResult, InvoiceRequest, InvoiceWriter } from '../core/invoice/writer.js';
 import { checkListing } from '../core/silog/web/invoiceWriter.js';
 import { parseInvoiceListing } from '../core/silog/web/invoice.js';
-import { DEFAULT_INVOICE_SETTINGS, normalizeProduct, renderObservation, validateObservationTemplate } from '../core/invoice/service.js';
+import { DEFAULT_INVOICE_SETTINGS, cleanProduct, renderObservation, validateObservationTemplate } from '../core/invoice/service.js';
 import { setLogSink } from '../core/logger.js';
 import { MockSilogtranSource } from '../core/recon/silogtran.js';
 import type { InvoiceDto, InvoicePlanDto, InvoiceRunDetailDto, InvoiceSettingsDto } from '../core/types.js';
@@ -96,10 +96,11 @@ describe('facturación 4a', () => {
   afterAll(async () => ctx.db.close());
 
   it('observación: producto sin guiones, plantilla por defecto reproduce el ejemplo y se trunca a 176', () => {
-    expect(normalizeProduct('b-100')).toBe('B100');
-    const v = { product: 'B100', origin: 'CARTAGENA', destination: 'MALAMBO', transport: '6008613622', serviceEntrySheet: '1005579437', remesa: '1' };
+    expect(cleanProduct('  B-100 ')).toBe('B-100'); // verbatim: el guion y las mayúsculas se conservan
+    expect(cleanProduct('b-100')).toBe('b-100');
+    const v = { product: 'B-100', origin: 'CARTAGENA', destination: 'MALAMBO', transport: '6008613622', serviceEntrySheet: '1005579437', remesa: '1' };
     const def = 'SERVICIO DE TRANSPORTE {product} {origin} - {destination} {transport} {serviceEntrySheet}';
-    expect(renderObservation(def, v)).toEqual({ text: 'SERVICIO DE TRANSPORTE B100 CARTAGENA - MALAMBO 6008613622 1005579437', truncated: false });
+    expect(renderObservation(def, v)).toEqual({ text: 'SERVICIO DE TRANSPORTE B-100 CARTAGENA - MALAMBO 6008613622 1005579437', truncated: false });
     const long = renderObservation(def, { ...v, origin: 'X'.repeat(200) });
     expect(long.truncated).toBe(true);
     expect(long.text.length).toBeLessThanOrEqual(176);
@@ -125,7 +126,7 @@ describe('facturación 4a', () => {
     expect(p.writer).toMatchObject({ mode: 'mock', simulated: true });
     expect(p.eligible.map((e) => e.transportNumber).sort()).toEqual(['T-E1', 'T-E2', 'T-E3', 'T-E4']);
     expect(byRemesa(p, '1')).toMatchObject({ terpelValue: '1000000', status: 'eligible' });
-    expect(byRemesa(p, '1').observation).toBe('SERVICIO DE TRANSPORTE B100 AAA - BBB T-E1 HOJA1');
+    expect(byRemesa(p, '1').observation).toBe('SERVICIO DE TRANSPORTE B-100 AAA - BBB T-E1 HOJA1');
     const cat = (c: string) => p.excluded.filter((e) => e.category === c).map((e) => e.transportNumber);
     expect(cat('volume_zero')).toEqual(['T-X1']);
     expect(cat('incomplete')).toEqual(['T-X2']);
@@ -190,6 +191,19 @@ describe('facturación 4a', () => {
     await wb.xlsx.load(buf.data as unknown as ArrayBuffer);
     expect(wb.worksheets.map((s) => s.name)).toEqual(['Resumen', 'Facturadas', 'Omitidas e inciertas', 'Excluidas del plan']);
     w.freightOverride.clear();
+  });
+
+  it('un cambio de observación/producto invalida el ensayo anterior y exige uno nuevo', async () => {
+    const p = await plan();
+    const e = p.eligible.find((x) => x.status === 'rehearsed' || x.status === 'eligible') as InvoiceDto;
+    expect(e).toBeTruthy();
+    await call('POST', `/api/invoices/${e.id}/rehearse`, tok.fact);
+    await ctx.db.query(`update invoices set observation = 'SERVICIO DE TRANSPORTE B100 X', product = 'B100' where id = $1`, [e.id]); // como un ensayo viejo
+    const again = await plan();
+    const row = again.eligible.find((x) => x.id === e.id) as InvoiceDto;
+    expect(row.status).toBe('eligible'); // vuelve a exigir ensayo
+    expect(row.observation).toMatch(/B-100/);
+    expect(row.product).toBe('B-100');
   });
 
   it('escritor real: lista permitida, ensayo obligatorio, lote desactivado por defecto, parada ante incierto y reanudación', async () => {
@@ -276,13 +290,19 @@ describe('facturación 4a', () => {
     expect(rows[0]).toMatchObject({ remesa: '0101229798', peso: '10194', tarifaCliente: '162', total: '1651428', checkbox: 'ctl0$MainModule$porFacturar$ctl1$valido' });
     const s = DEFAULT_INVOICE_SETTINGS;
     const req: InvoiceRequest = {
-      remesaCode: '101229798', transportNumber: '6008613622', expectedFreight: '1651428', observation: 'SERVICIO DE TRANSPORTE B100 A - B 6008613622 1005579437', purchaseOrder: '6008613622', product: 'B100',
+      remesaCode: '101229798', transportNumber: '6008613622', expectedFreight: '1651428', observation: 'SERVICIO DE TRANSPORTE B-100 A - B 6008613622 1005579437', purchaseOrder: '6008613622', product: 'B-100',
       params: { costCenter: s.costCenter, client: s.client, printableName: s.printableName, seller: s.seller, paymentDays: s.paymentDays, paymentCity: s.paymentCity, currency: s.currency, paymentMethod: s.paymentMethod, invoiceType: s.invoiceType, divide: s.divide, maxRemesas: s.maxRemesas, withholdingPercent: s.withholdingPercent },
     };
     const pct = String(s.withholdingPercent);
-    const good = checkListing(req, rows, pct, true, true);
+    const good = checkListing(req, rows, pct, true, true, null, 'B-100');
     expect(good.checks.filter((c) => !c.ok)).toEqual([]);
     expect(good.checks.find((c) => /REGLA CR/.test(c.name))?.ok).toBe(true);
+    expect(good.checks.find((c) => /\(Home_111\) y usado/.test(c.name))?.ok).toBe(true);
+    const info = good.checks.find((c) => /Home_111 vs\./.test(c.name));
+    expect(info?.ok).toBe(true); // informativo: el listado trae B100 y no bloquea
+    expect(info?.detail).toMatch(/DIFIEREN/);
+    expect(checkListing(req, rows, pct, true, true, null, null).checks.find((c) => /\(Home_111\) y usado/.test(c.name))?.ok).toBe(false); // sin producto de Home no pasa
+    expect(checkListing(req, rows, pct, true, true, null, 'B100').checks.find((c) => /\(Home_111\) y usado/.test(c.name))?.ok).toBe(false); // distinto al de la observación
     const bad = checkListing(req, parseInvoiceListing(html('1651429')), pct, true, true);
     expect(bad.checks.find((c) => /REGLA CR/.test(c.name))?.ok).toBe(false);
   });

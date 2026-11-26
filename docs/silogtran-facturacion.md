@@ -30,12 +30,12 @@ Si no se cumple la remesa se **omite** (no se factura) con el motivo; la corrida
 ## Observación y orden de compra
 Plantilla por defecto (editable por el administrador, máx. 176 caracteres, truncada por palabra con aviso):
 `SERVICIO DE TRANSPORTE {product} {origin} - {destination} {transport} {serviceEntrySheet}` (mayúsculas, espacios simples). Marcadores: `{product}`, `{origin}`,
-`{destination}`, `{transport}`, `{serviceEntrySheet}`, `{remesa}`. Producto: columna «Producto» de la consulta de la remesa (Home_111), normalizado quitando guiones.
+`{destination}`, `{transport}`, `{serviceEntrySheet}`, `{remesa}`. Producto: columna «Producto» de la consulta de la remesa (Home_111, tabla ItemsRemesa) TAL CUAL (p. ej. `B-100`, con guion; solo se recortan espacios extremos y se colapsan los múltiples). No hay parámetro global de producto (migración 0013: `invoices.product` por factura; se elimina `invoice_settings.product`).
 Origen/destino: informe de Silogtran. Transporte y hoja: correo de Terpel. **Orden de compra = número de transporte.**
 Si falta producto, origen, destino, transporte, hoja o valor, la remesa NO es elegible y queda en «Excluidas» con el motivo. En el ensayo se compara la
 observación generada con la que Silogtran trae precargada y el producto con la «Observación» del listado, y se reporta por remesa (informativo).
 
-**PENDIENTE DE CONFIRMAR:** la consulta Home muestra el producto como `B-100` y el listado de facturar como `B100`; por defecto se quitan los guiones.
+En el ensayo se vuelve a leer Home_111: si no se puede leer el producto, o difiere del usado en la observación, el ensayo NO pasa (no se factura). La columna «Observación» del listado de facturar trae `B100`; se compara con el de Home_111 y se informa la diferencia (esperable) sin bloquear. Cambiar observación o producto cambia el hash del ensayo: el ensayo anterior queda inválido y el plan lo devuelve a «elegible».
 
 ## Módulo (código)
 - `core/invoice/service.ts` (plan, ensayo, emisión protegida, verificación, consulta, resolución manual), `core/invoice/runs.ts` (corrida por pasos), `core/invoice/excel.ts` (reporte),
@@ -58,5 +58,5 @@ observación generada con la que Silogtran trae precargada y el producto con la 
 - Una factura SIMULADA no cuenta como emitida; al planificar con escritor real vuelve a ser elegible.
 
 ## Qué debe confirmar el usuario antes de la primera factura real
-Vendedor (`CS`), retefuente (1 %), días de pago (15), ciudad de pago, tipo de factura, plantilla de observación, normalización del producto (B-100 → B100),
+Vendedor (`CS`), retefuente (1 %), días de pago (15), ciudad de pago, tipo de factura, plantilla de observación,
 la cuenta de facturación en Usuarios, y activar la emisión real solo para UNA remesa en la lista permitida (ensayo → «Facturar esta» → verificar en Silogtran).

@@ -11,7 +11,7 @@ import { SilogWebError } from './errors.js';
 import { fillInvoiceForm, parseInvoiceListing, readWithholding, P } from './invoice.js';
 import type { FillStep, InvoiceParams, ListingRowRaw } from './invoice.js';
 import { PradoPage } from './prado.js';
-import { homeNumber } from './remesa.js';
+import { homeNumber, readRemesaHome } from './remesa.js';
 import { openWebSession } from './session.js';
 import type { WebWriterDeps } from './writer.js';
 
@@ -38,7 +38,7 @@ const listingDto = (r: ListingRowRaw): InvoiceListingDto => ({
 interface Prepared { prado: PradoPage; row: ListingRowRaw | null; checks: WriterCheck[]; listing: InvoiceListingDto | null; amounts: InvoiceAmountsDto | null; facturar: { target: string; lock: string | null } | null }
 
 /** Reglas del ensayo sobre lo que Silogtran LISTÓ. Devuelve las comprobaciones (todas deben ser ok para facturar). */
-export function checkListing(req: InvoiceRequest, rows: ListingRowRaw[], withholdingPercent: string, fillOk: boolean, hasFacturar: boolean, preloadedObservation: string | null = null): { checks: WriterCheck[]; row: ListingRowRaw | null; amounts: InvoiceAmountsDto | null } {
+export function checkListing(req: InvoiceRequest, rows: ListingRowRaw[], withholdingPercent: string, fillOk: boolean, hasFacturar: boolean, preloadedObservation: string | null = null, homeProduct: string | null | undefined = undefined): { checks: WriterCheck[]; row: ListingRowRaw | null; amounts: InvoiceAmountsDto | null } {
   const checks: WriterCheck[] = [];
   checks.push({ name: 'configuración del cliente completa (cliente, vendedor, moneda, forma de pago, tipo)', ok: fillOk });
   const wantPct = String(req.params.withholdingPercent);
@@ -62,9 +62,13 @@ export function checkListing(req: InvoiceRequest, rows: ListingRowRaw[], withhol
   } else checks.push({ name: 'peso neto cumplido × tarifa cliente = total de la fila', ok: true, detail: 'no se pudo recalcular (dato ausente)' });
   checks.push({ name: `observación ≤ ${MAX_OBSERVATION} caracteres y no vacía`, ok: req.observation.trim().length > 0 && req.observation.length <= MAX_OBSERVATION });
   // Informativo (se reporta por remesa): observación/descripción/producto que Silogtran propone frente a lo generado.
-  const normP = (v: string | null): string => (v ?? '').toUpperCase().replace(/[-\s]/g, '');
+  // Producto: el de la CONSULTA de la remesa (Home_111) verbatim. Si no se pudo leer, el ensayo no pasa.
+  if (homeProduct !== undefined) {
+    const hp = (homeProduct ?? '').replace(/\s+/g, ' ').trim();
+    checks.push({ name: 'producto leído de la consulta de la remesa (Home_111) y usado tal cual en la observación', ok: hp !== '' && hp === req.product, detail: hp === '' ? 'no se pudo leer el producto de Home_111' : hp === req.product ? `«${hp}»` : `Home_111 trae «${hp}» y la observación usa «${req.product}»: genere el plan de nuevo` });
+  }
   checks.push({ name: 'observación generada vs. la que Silogtran trae precargada (informativo)', ok: true, detail: `generada «${req.observation}»; precargada «${preloadedObservation ?? ''}»` });
-  checks.push({ name: 'producto de la observación vs. «Observación» del listado de Silogtran (informativo)', ok: true, detail: `observación usa «${req.product}»; el listado trae «${row.producto ?? ''}»${normP(row.producto) === normP(req.product) ? ' (coinciden)' : ' (DIFIEREN)'}` });
+  checks.push({ name: 'producto de Home_111 vs. columna «Observación» del listado de facturar (informativo)', ok: true, detail: `Home_111 «${req.product}»; el listado trae «${row.producto ?? ''}»${(row.producto ?? '').trim() === req.product ? ' (coinciden)' : ' (DIFIEREN, esperable p. ej. B-100 vs B100; no bloquea)'}` });
   checks.push({ name: 'descripción de la remesa precargada por Silogtran (informativo)', ok: true, detail: row.descripcion ?? '' });
   checks.push({ name: 'botón «Facturar Remesas» presente (no se pulsa en el ensayo)', ok: hasFacturar });
   return { checks, row, amounts: total ? computeAmounts(total, req.params.withholdingPercent) : null };
@@ -100,7 +104,9 @@ export class SilogtranWebInvoiceWriter implements InvoiceWriter {
     if (res.text.includes('ctl0$MainModule$BtnIngresar')) throw new SilogWebError('WEB_BAD_PAGE', 'La sesión expiró al listar la remesa');
     const rows = parseInvoiceListing(res.text);
     const hasFacturar = `${P}FacturarRemesas` in prado.fields || res.text.includes(`name="${P}FacturarRemesas"`);
-    const checked = checkListing(req, rows, readWithholding(prado).percent, fillOk, hasFacturar, preloaded);
+    let homeProduct: string | null = null;
+    try { homeProduct = (await readRemesaHome(client, req.remesaCode, true)).producto; } catch { homeProduct = null; }
+    const checked = checkListing(req, rows, readWithholding(prado).percent, fillOk, hasFacturar, preloaded, homeProduct);
     const fLock = Object.keys(prado.fields).find((k) => /IDLockHidden_.*FacturarRemesas$/i.test(k)) ?? null;
     return { prado, row: checked.row, checks: checked.checks, listing: checked.row ? { ...listingDto(checked.row), preloadedObservation: preloaded } : null, amounts: checked.amounts, facturar: hasFacturar ? { target: `${P}FacturarRemesas`, lock: fLock } : null };
   }

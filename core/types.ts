@@ -413,7 +413,7 @@ export type InvoiceStatus = 'eligible' | 'rehearsed' | 'issuing' | 'issued' | 'f
 
 export interface InvoiceSettingsDto {
   costCenter: string; client: string; printableName: string; seller: string; paymentDays: number; paymentCity: string; currency: string; paymentMethod: string;
-  invoiceType: string; divide: 'SI' | 'NO'; maxRemesas: number; withholdingPercent: number; product: string; observationTemplate: string;
+  invoiceType: string; divide: 'SI' | 'NO'; maxRemesas: number; withholdingPercent: number; observationTemplate: string;
   writerMode: 'mock' | 'web'; writerAllowlist: string[]; writerAllowAll: boolean; batchEnabled: boolean;
 }
 
@@ -431,7 +431,7 @@ export interface InvoiceListingDto {
 export interface InvoiceDto {
   id: string; remesaCode: string; transportNumber: string; plate: string | null; serviceDate: string; terpelValue: string; expectedFreight: string;
   status: InvoiceStatus; reviewCode: string | null; reviewDetail: string | null; valuesBefore: Record<string, unknown> | null; valuesAfter: Record<string, unknown> | null;
-  invoiceNumber: string | null; accountUser: string | null; writerKind: string | null; simulated: boolean; observation: string | null; issuedBy: string | null;
+  invoiceNumber: string | null; accountUser: string | null; writerKind: string | null; simulated: boolean; observation: string | null; product: string | null; issuedBy: string | null;
   issuedAt: string | null; lastError: string | null; updatedAt: string;
 }
 
