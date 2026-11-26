@@ -29,6 +29,8 @@ export interface AdjustDeps {
   writer: SilogtranWriter;
   /** Lectura de los valores REALES de cada remesa (consulta Home_111). */
   homeReader?: HomeReader | null;
+  /** Escritor según el tipo con el que se aplicó una propuesta (para consultar su estado aunque el modo guardado haya cambiado). */
+  writerFor?: (kind: string) => SilogtranWriter | null;
   /** Remesas permitidas para la escritura real (se evalúa solo si writer.kind === 'web'). */
   allow?: { all: boolean; list: string[] };
 }
@@ -594,9 +596,11 @@ async function finalizeApplied(deps: AdjustDeps, actor: string, p: ProposalRow, 
 }
 
 /** Resuelve un 'uncertain' CONSULTANDO el estado antes de cualquier reintento. */
-export async function checkUncertain(deps: AdjustDeps, actor: string, id: string): Promise<ProposalDto> {
-  await sweepExpiredLeases(deps.db);
-  const p = await loadRow(deps.db, id);
+export async function checkUncertain(deps0: AdjustDeps, actor: string, id: string): Promise<ProposalDto> {
+  await sweepExpiredLeases(deps0.db);
+  const p = await loadRow(deps0.db, id);
+  // La consulta usa el escritor con el que se APLICÓ (aunque hoy el modo guardado sea otro): un escritor simulado no sabe nada de lo real.
+  const deps: AdjustDeps = { ...deps0, writer: (p.writer_kind ? deps0.writerFor?.(p.writer_kind) : null) ?? deps0.writer };
   if (p.status !== 'uncertain') throw new AppError(409, 'INVALID_TRANSITION', `Solo se consulta el estado de propuestas inciertas (estado ${p.status})`);
   const res = await deps.writer.getChangeState(p.remesa_code as string, changeOf(p), { actor, expectedBefore: p.reversal_values });
   if (res.state === 'applied') await finalizeApplied(deps, actor, p, res.fields as Record<string, unknown> | undefined);

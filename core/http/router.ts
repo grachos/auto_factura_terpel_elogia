@@ -319,6 +319,7 @@ async function dispatchAdjust(
   const deps = {
     db: ctx.db, storage: ctx.storage, silog: ctx.silog, writer: settings.writerMode === 'web' ? ctx.webWriter : ctx.writer,
     allow: { all: settings.writerAllowAll, list: settings.writerAllowlist }, homeReader: ctx.homeReader,
+    writerFor: (kind: string) => (kind === 'web' ? ctx.webWriter : kind === 'mock' ? ctx.writer : null),
   };
   const uid = (seg: string | undefined): string => {
     if (!isUuid(seg)) throw new AppError(400, 'INVALID_ID', 'Identificador inválido');

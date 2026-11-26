@@ -505,6 +505,24 @@ describe('aplicar con escritor real (servicio, API, lista de permitidas, ensayo,
     expect(f.grabarPosts.length).toBe(before + 1);
   });
 
+  it('Consultar estado usa el escritor con el que se aplicó, aunque el modo guardado ya sea simulado', async () => {
+    await ctx.db.query(`update adjustment_proposals set status = 'discarded' where status in ('applied','uncertain','verification_failed','proposed','approved')`);
+    f.screen = { peso: '10500', cantidad: '10500', tarifa: '235' };
+    await call('POST', `/api/reconciliations/${runId}/adjustments/generate`, tok.fact);
+    const p = (j<{ proposals: ProposalDto[] }>(await call('GET', '/api/adjustments', tok.fact, undefined, { runId })).proposals).find((x) => x.kind === 'adjust' && x.status === 'proposed') as ProposalDto;
+    await call('POST', `/api/adjustments/${p.id}/approve`, tok.fact);
+    await call('POST', `/api/adjustments/${p.id}/rehearse`, tok.fact);
+    f.mode = 'ambiguous'; // mensaje no reconocido: uncertain, pero Silogtran SÍ aplicó
+    expect(j<ProposalDto>(await call('POST', `/api/adjustments/${p.id}/apply`, tok.fact)).status).toBe('uncertain');
+    f.mode = 'success';
+    await call('PUT', '/api/adjustments/settings', tok.admin, { writerMode: 'mock' }); // el admin ya restableció el modo
+    const checked = j<ProposalDto>(await call('POST', `/api/adjustments/${p.id}/check`, tok.fact));
+    expect(checked.status).toBe('applied'); // NO 'failed' por haber consultado a un escritor simulado
+    expect(checked.simulated).toBe(false);
+    expect(checked.verification).toMatchObject({ ok: true, source: 'home_111' });
+    await call('PUT', '/api/adjustments/settings', tok.admin, { writerMode: 'web' });
+  });
+
   it('una aplicación cortada (lease vencido) queda uncertain, nunca se reintenta sola', async () => {
     await ctx.db.query(`update adjustment_proposals set status = 'discarded' where status in ('applied','uncertain') and kind = 'adjust'`);
     f.screen = { peso: '10500', cantidad: '10500', tarifa: '235' };
