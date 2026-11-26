@@ -107,6 +107,14 @@ describe('motor de cascada', () => {
     expect(r.reason).toContain('más cercano');
     expect(r.trace.at(-1)).toMatchObject({ filter: 'date', before: 3, after: 1, reason: 'closest_date' });
   });
+  it('placa preferente que lleva a NO_MATCH se omite y reencuentra el registro con otra placa', () => {
+    const viejo = cand({ id: 'viejo', dispatchDate: '2026-10-29' }); // misma placa, ruta, pero fuera de ventana
+    const bueno = cand({ id: 'bueno', dispatchDate: '2026-11-18', plateNormalized: 'ZZZ999' });
+    const r = reconcile(terpel(), [viejo, bueno], params());
+    expect(r.chosenId).toBe('bueno');
+    expect(r.differences.some((d) => d.field === 'plate')).toBe(true);
+    expect(r.trace.find((s) => s.filter === 'plate')).toMatchObject({ skipped: true, reason: 'fallback' });
+  });
   it('AMBIGUOUS con dos viajes del mismo conductor y ruta en la misma fecha (nunca elige)', () => {
     const r = reconcile(terpel(), [cand({ dispatchDate: '2026-11-19' }), cand({ dispatchDate: '2026-11-19' })], params());
     expect(r.status).toBe('AMBIGUOUS');

@@ -1,6 +1,6 @@
 import { daysBetween, normalizeDocument, normalizePlace, parseTerpelRoute, sameNumber, toNumber } from './normalize.js';
 
-export const RULES_VERSION = 'recon-1.1.0';
+export const RULES_VERSION = 'recon-1.2.0';
 
 export type FilterKey = 'driver' | 'plate' | 'route' | 'date';
 export type FilterMode = 'exclusive' | 'preferred';
@@ -41,7 +41,7 @@ export interface TraceStep {
   after: number;
   mode: FilterMode;
   skipped: boolean;
-  reason?: 'inactive' | 'would_empty' | 'no_terpel_data' | 'closest_date';
+  reason?: 'inactive' | 'would_empty' | 'no_terpel_data' | 'closest_date' | 'fallback';
 }
 
 export interface Difference {
@@ -161,6 +161,17 @@ function closestByDate(cands: SilogCandidate[], serviceDate: string | null): Sil
 
 /** Cascada de filtros. `base` ya excluye ANULADO y clientes distintos de Terpel. */
 export function reconcile(t: TerpelInput, base: SilogCandidate[], p: EngineParams, manualId?: string | null): EngineResult {
+  const first = reconcileCore(t, base, p, manualId, false);
+  // Un filtro preferente (p. ej. placa) que sí encontró candidatos pero llevó a NO_MATCH no debe ocultar
+  // el registro correcto: se reintenta sin los filtros preferentes.
+  if (first.status === 'NO_MATCH' && first.trace.some((s) => s.mode === 'preferred' && !s.skipped)) {
+    const retry = reconcileCore(t, base, p, manualId, true);
+    if (retry.status !== 'NO_MATCH' && retry.status !== 'INSUFFICIENT_DATA') return retry;
+  }
+  return first;
+}
+
+function reconcileCore(t: TerpelInput, base: SilogCandidate[], p: EngineParams, manualId: string | null | undefined, skipPreferred: boolean): EngineResult {
   const filters = [...p.filters].sort((a, b) => a.position - b.position);
   const zeroMode = p.zeroVolumeMode ?? 'ignore';
   if (toNumber(t.transportVolume) === 0 && zeroMode === 'ignore') {
@@ -190,6 +201,11 @@ export function reconcile(t: TerpelInput, base: SilogCandidate[], p: EngineParam
     const before = current.length;
     if (!f.active) {
       trace.push({ filter: f.key, before, after: before, mode: f.mode, skipped: true, reason: 'inactive' });
+      continue;
+    }
+    if (skipPreferred && f.mode === 'preferred') {
+      trace.push({ filter: f.key, before, after: before, mode: f.mode, skipped: true, reason: 'fallback' });
+      infos.push({ field: f.key, terpel: null, silogtran: null, severity: 'info', note: `Filtro preferente de ${FILTER_LABEL[f.key]} omitido: con él no había coincidencia` });
       continue;
     }
     const pred = predicate(f.key, t, p);
