@@ -6,7 +6,7 @@ import { compareAdjustWorkbook, flatten } from '../core/adjust/excel.js';
 import { ALL_STATUSES, TRANSITIONS, _moveForTests, autoEligibility, canTransition, renderReason, validateTemplate } from '../core/adjust/service.js';
 import { computeTariff, normalizeNumberString } from '../core/adjust/tariff.js';
 import { MockSilogtranWriter } from '../core/adjust/writer.js';
-import type { RehearsalResult, SilogtranWriter, TariffChange, WriterOutcome } from '../core/adjust/writer.js';
+import type { ChangeStateResult, RehearsalResult, SilogtranWriter, TariffChange, WriterOutcome } from '../core/adjust/writer.js';
 import { createContext } from '../core/context.js';
 import type { AppContext } from '../core/context.js';
 import type { Db } from '../core/db/types.js';
@@ -109,14 +109,13 @@ class RealisticTestWriter implements SilogtranWriter {
   constructor(private readonly rows: Record<string, unknown>[]) {}
   async changeTariff(c: TariffChange): Promise<WriterOutcome> {
     this.calls.push(c);
-    if (this.honest) {
-      const row = this.rows.find((r) => String(r.remesa_codigo) === c.remesaCode);
-      if (row) { row.remesa_peso = Number(c.pesoRemesa); row.total_remesa = String(Number(c.pesoRemesa) * Number(c.nuevaTarifa)); }
-    }
+    if (!this.honest) return { outcome: 'verification_failed', detail: 'La consulta de la remesa no coincide (simulado)' };
+    const row = this.rows.find((r) => String(r.remesa_codigo) === c.remesaCode);
+    if (row) { row.remesa_peso = Number(c.pesoRemesa); row.total_remesa = String(Number(c.pesoRemesa) * Number(c.nuevaTarifa)); }
     return { outcome: 'applied' };
   }
   async rehearse(c: TariffChange): Promise<RehearsalResult> { return { simulated: false, payload: c, before: null, checks: [], wouldPostGrabar: false }; }
-  async getChangeState(): Promise<'applied' | 'not_applied' | 'unknown'> { return 'unknown'; }
+  async getChangeState(): Promise<ChangeStateResult> { return { state: 'unknown' }; }
 }
 
 describe('ajustes de tarifa (API)', () => {
@@ -183,7 +182,6 @@ describe('ajustes de tarifa (API)', () => {
     ctx.silog = new MockSilogtranSource(rows);
     mockWriter = new MockSilogtranWriter();
     ctx.writer = mockWriter;
-    ctx.verifyDelayMs = 0;
     runId = await reconcile('2026-11-17', '2026-11-25');
   });
   afterAll(async () => ctx.db.close());
@@ -196,7 +194,7 @@ describe('ajustes de tarifa (API)', () => {
     const a = ps.find((p) => p.transportNumber === 'T-A') as ProposalDto;
     expect(a).toMatchObject({ status: 'proposed', tariff: '235', gallons: '10487', currentWeight: '10460', currentTotal: '2464445', targetValue: '2464445', weightSource: 'terpel', simulated: false });
     expect(a.lines.map((l) => [l.field, l.current, l.proposed])).toEqual([
-      ['pesoRemesa', '10460', '10487'], ['cantidadRemesa', null, '10487'], ['nuevaTarifa', '100', '235'], ['totalRemesa', '2464445', '2464445'],
+      ['pesoRemesa', '10460', '10487'], ['cantidadRemesa', '10460', '10487'], ['nuevaTarifa', '100', '235'], ['totalRemesa', '2464445', '2464445'],
     ]);
     expect(a.reason).toBe('Ajuste según autorización de pago Terpel, transporte T-A, gasto GT-A');
     expect(ps.find((p) => p.transportNumber === 'T-B')).toMatchObject({ tariff: '658', gallons: '10174' });
@@ -235,7 +233,7 @@ describe('ajustes de tarifa (API)', () => {
     const a = await byT('T-A');
     const sim = j<{ simulated: boolean; payload: Record<string, string>; blocked: string | null }>(await call('POST', `/api/adjustments/${a.id}/simulate`, tok.fact));
     expect(sim.simulated).toBe(true);
-    expect(sim.payload).toEqual({ remesaCode: '1', reason: a.reason, pesoRemesa: '10487', cantidadRemesa: '10487', nuevaTarifa: '235' });
+    expect(sim.payload).toEqual({ remesaCode: '1', reason: a.reason, pesoRemesa: '10487', cantidadRemesa: '10487', nuevaTarifa: '235', valorTotal: '2464445' });
     expect((await byT('T-A')).status).toBe('proposed');
     expect(mockWriter.calls).toHaveLength(0);
     // aplicar sin aprobar: transición inválida
@@ -376,13 +374,13 @@ describe('ajustes de tarifa (API)', () => {
     await ctx.db.query(`delete from silog_credentials`);
   });
 
-  it('escritor no simulado: verificación posterior (applied) y verification_failed si no coincide', async () => {
+  it('escritor no simulado: verificación en la consulta de la remesa (applied) y verification_failed si no coincide', async () => {
     const real = new RealisticTestWriter(rows);
     ctx.writer = real;
     const a = await byT('T-A'); // sigue aprobada
     const ok = j<ProposalDto>(await call('POST', `/api/adjustments/${a.id}/apply`, tok.fact));
     expect(ok).toMatchObject({ status: 'applied', simulated: false });
-    expect(ok.verification).toMatchObject({ ok: true });
+    expect(ok.verification).toMatchObject({ ok: true, source: 'home_111' });
     expect(rows[0]?.remesa_peso).toBe(10487);
     // segunda: el escritor "dice" aplicar pero Silogtran no cambió => verification_failed
     real.honest = false;

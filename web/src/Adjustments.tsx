@@ -10,6 +10,7 @@ const STATUS_LABEL: Record<string, string> = {
 const REVIEW_LABEL: Record<string, string> = {
   TARIFF_NOT_EXACT: 'La tarifa no es un decimal exacto', TARIFF_TOO_LONG: 'La tarifa exacta no cabe en 12 caracteres', INVALID_INPUT: 'Galones o valor inválidos',
   NOT_CUMPLIDO: 'El registro ya no está CUMPLIDO', ALREADY_INVOICED: 'El registro ya tiene factura',
+  CURRENT_VALUES_UNAVAILABLE: 'No se pudieron leer los valores reales de la remesa (no se asumen)', ALREADY_ADJUSTED: 'Ya ajustado: no hace falta proponer un cambio',
 };
 const EVENT_LABEL: Record<string, string> = {
   generated: 'Propuesta generada', regenerated: 'Propuesta regenerada', superseded: 'Reemplazada por otra propuesta', approved: 'Aprobada', rejected: 'Rechazada',
@@ -20,9 +21,10 @@ const EVENT_LABEL: Record<string, string> = {
 };
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : 'Error inesperado');
 const when = (v: string | null): string => (v ? new Date(v).toLocaleString('es-CO') : '—');
-const num = (v: string | null): string => (v === null ? 'no disponible en el informe' : v);
+const num = (v: string | null): string => (v === null ? 'no disponible' : v);
 
 function Badge({ p }: { p: ProposalDto }) {
+  if (p.reviewCode === 'ALREADY_ADJUSTED') return <span className="badge adj-applied" data-testid="adj-already">Ya ajustado</span>;
   return <span className={`badge adj-${p.status}`}>{STATUS_LABEL[p.status] ?? p.status}{p.simulated ? ' · simulado' : ''}</span>;
 }
 
@@ -99,7 +101,7 @@ export function Adjustments({ cfg: _cfg, me, writer, onWriter }: { cfg: PublicCo
       <section className="card" aria-labelledby="adj-title" data-testid="adj-panel">
         <h2 id="adj-title">Ajustes de tarifa</h2>
         <p className="muted">
-          Para cada servicio con diferencias se calcula la nueva tarifa (valor de Terpel ÷ galones, decimal exacto de hasta 12 caracteres con punto). Si no es exacta, queda en revisión y no se puede aprobar.
+          Los valores actuales se leen de la consulta de la remesa en Silogtran (el informe no refleja el peso ni la cantidad). Para cada servicio con diferencias se calcula la nueva tarifa (valor de Terpel ÷ galones, decimal exacto de hasta 12 caracteres con punto). Si no es exacta, queda en revisión y no se puede aprobar.
         </p>
         <div className="row">
           <label>Conciliación

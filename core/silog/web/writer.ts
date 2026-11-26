@@ -1,13 +1,18 @@
 // Escritor REAL de «Procedimiento de Cambio Tarifa» (docs/silogtran-cambio-tarifa.md).
 // Seguridad: un ÚNICO método (postGrabar) envía Grabar y solo changeTariff lo llama; el ensayo (rehearse) nunca lo hace.
+// La verificación se hace en la página de CONSULTA de la remesa (Home_111); el informe de Silogtran no refleja estos campos.
 import { normalizeNumberString } from '../../adjust/tariff.js';
-import type { RehearsalCheck, RehearsalResult, ScreenValues, SilogtranWriter, TariffChange, WriteContext, WriterOutcome } from '../../adjust/writer.js';
+import type {
+  ChangeStateResult, FieldCheck, RehearsalCheck, RehearsalResult, ScreenValues, SilogtranWriter, TariffChange, WriteContext, WriterOutcome,
+} from '../../adjust/writer.js';
 import type { Db } from '../../db/types.js';
 import { log } from '../../logger.js';
 import type { SilogWebClient } from './client.js';
 import { describePage, TARIFF_PAGE } from './diagnostic.js';
 import { SilogWebError } from './errors.js';
 import { PradoPage } from './prado.js';
+import { readRemesaHome } from './remesa.js';
+import type { RemesaState } from './remesa.js';
 import { openWebSession } from './session.js';
 import type { WafSolver } from './waf.js';
 
@@ -25,17 +30,37 @@ export interface WebWriterDeps {
 
 export type GrabarVerdict = 'success' | 'error' | 'ambiguous';
 
-/** Clasifica la respuesta de Grabar. Cualquier cosa desconocida es 'ambiguous' (nunca éxito). */
+const ENTITIES: Record<string, string> = {
+  nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", aacute: 'á', eacute: 'é', iacute: 'í', oacute: 'ó', uacute: 'ú', ntilde: 'ñ',
+  Aacute: 'Á', Eacute: 'É', Iacute: 'Í', Oacute: 'Ó', Uacute: 'Ú', Ntilde: 'Ñ', uuml: 'ü', Uuml: 'Ü', iexcl: '¡', iquest: '¿',
+};
+/** Decodifica entidades HTML comunes (&eacute;, &nbsp;, &#233;, &#xE9;...). */
+export function decodeEntities(s: string): string {
+  return s
+    .replace(/&#x([0-9a-f]+);/gi, (_m, h: string) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_m, d: string) => String.fromCodePoint(Number(d)))
+    .replace(/&([a-zA-Z]+);/g, (m, n: string) => ENTITIES[n] ?? m);
+}
+const fold = (s: string): string => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+const SUCCESS_RE = /la remesa\s*#?\s*\d+\s+fue actualizad[oa] con exito/;
+const GENERIC_OK_RE = /(registro|cambio|tarifa|remesa).{0,40}(guardad|grabad|actualizad)|guardad[oa] con exito|se (ha )?(guard|grab|actualiz)/;
+const ERROR_RE = /error|no se pudo|no se puede|invalid|obligatori|ya existe/;
+
+/** Clasifica la respuesta de Grabar tras decodificar entidades. Todo lo desconocido es 'ambiguous' (nunca éxito). */
 export function classifyGrabarResponse(html: string): { verdict: GrabarVerdict; lines: string[] } {
-  const st = describePage(html);
-  const lines = [...new Set([...st.messages, ...st.labels.filter((l) => /guard|grab|actualiz|error|inv[aá]lid|no se/i.test(l))])];
-  const bodyText = html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, '\n');
-  for (const l of bodyText.split('\n').map((x) => x.replace(/\s+/g, ' ').trim()).filter((x) => x.length > 6 && x.length < 220)) {
-    if (/guardad|grabad|actualizad|con [eé]xito|exitos|error|no se pudo|no se puede|inv[aá]lid|obligatori|ya existe/i.test(l)) lines.push(l.slice(0, 160));
+  const decoded = decodeEntities(html);
+  const text = decoded.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, '\n').replace(/\\[nrt]/g, '\n').split(/[\n"']/);
+  const lines: string[] = [];
+  for (const raw of text) {
+    const l = raw.replace(/\s+/g, ' ').trim();
+    if (l.length > 6 && l.length < 220 && (GENERIC_OK_RE.test(fold(l)) || ERROR_RE.test(fold(l)) || SUCCESS_RE.test(fold(l)))) lines.push(l.replace(/\b\d{7,}\b/g, '#').slice(0, 160));
   }
   const uniq = [...new Set(lines)];
-  const err = uniq.some((l) => /error|no se pudo|no se puede|inv[aá]lid|obligatori|ya existe/i.test(l));
-  const ok = uniq.some((l) => /(registro|cambio|tarifa|remesa).{0,40}(guardad|grabad|actualizad)|guardad[oa] con [eé]xito|se (ha )?(guard|grab|actualiz)/i.test(l));
+  const folded = uniq.map(fold);
+  const exact = folded.some((l) => SUCCESS_RE.test(l.replace(/#/g, '0')) || /la remesa\s*#\s*fue actualizad[oa] con exito/.test(l));
+  const err = folded.some((l) => ERROR_RE.test(l) && !SUCCESS_RE.test(l.replace(/#/g, '0')) && !/la remesa\s*#\s*fue actualizad/.test(l));
+  const ok = exact || folded.some((l) => GENERIC_OK_RE.test(l));
   return { verdict: ok && !err ? 'success' : err && !ok ? 'error' : 'ambiguous', lines: uniq.slice(0, 6) };
 }
 
@@ -45,6 +70,19 @@ const same = (a: string | null | undefined, b: string | null | undefined): boole
   return x !== null && y !== null && x === y;
 };
 const sameValues = (a: ScreenValues, b: ScreenValues): boolean => same(a.peso, b.peso) && same(a.cantidad, b.cantidad) && same(a.tarifa, b.tarifa);
+export const toValues = (s: RemesaState): ScreenValues => ({ peso: s.peso, cantidad: s.pesoBruto, tarifa: s.tarifa, flete: s.flete });
+const wantOf = (c: TariffChange): ScreenValues => ({ peso: c.pesoRemesa, cantidad: c.cantidadRemesa, tarifa: c.nuevaTarifa });
+
+/** Detalle por campo de una lectura de Home_111 contra lo esperado. */
+export function fieldChecks(now: ScreenValues, want: ScreenValues, valorTotal?: string | null): Record<string, FieldCheck> {
+  const out: Record<string, FieldCheck> = {
+    peso: { expected: want.peso, actual: now.peso, ok: same(now.peso, want.peso) },
+    cantidad: { expected: want.cantidad, actual: now.cantidad, ok: same(now.cantidad, want.cantidad) },
+    tarifa: { expected: want.tarifa, actual: now.tarifa, ok: same(now.tarifa, want.tarifa) },
+  };
+  if (valorTotal) out.flete = { expected: valorTotal, actual: now.flete ?? null, ok: same(now.flete, valorTotal) }; // informativo
+  return out;
+}
 
 interface Row { ctl: string; names: Record<string, string> }
 
@@ -59,9 +97,6 @@ function rows(prado: PradoPage): Row[] {
   }
   return [...byCtl.values()];
 }
-const beforeOf = (prado: PradoPage, r: Row): ScreenValues => ({
-  peso: prado.fields[r.names.anterior_peso as string] ?? '', cantidad: prado.fields[r.names.anterior_cantidad as string] ?? '', tarifa: prado.fields[r.names.anterior_tarifa as string] ?? '',
-});
 
 interface Prepared { prado: PradoPage; row: Row; before: ScreenValues; checks: RehearsalCheck[]; grabar: { target: string | null; hasUuid: boolean; hasLock: boolean }; lockName: string | null }
 
@@ -78,9 +113,22 @@ export class SilogtranWebWriter implements SilogtranWriter {
     return openWebSession({ db: this.deps.db, encryptionKey: this.deps.encryptionKey, baseUrl: this.deps.baseUrl, waf: this.deps.waf, fetchFn: this.deps.fetchFn?.() }, 'adjust', actor);
   }
 
-  /** GET + autocompletado exacto + razón + Buscar + lectura de anterior_*; deja los 3 campos nuevos fijados. NO graba. */
+  /** Lee Home_111 (valores reales), GET + autocompletado exacto + razón + Buscar; deja los 3 campos nuevos fijados. NO graba. */
   private async prepare(client: SilogWebClient, change: TariffChange, expectedBefore: ScreenValues | null | undefined, withFields: boolean): Promise<Prepared> {
     const checks: RehearsalCheck[] = [];
+    const home = await readRemesaHome(client, change.remesaCode, true);
+    const before = toValues(home);
+    checks.push({ name: 'valores reales de la remesa leídos en la consulta (Home_111)', ok: true, detail: `peso ${before.peso}, cantidad (peso bruto) ${before.cantidad}, tarifa ${before.tarifa}, flete ${before.flete}` });
+    if (expectedBefore) {
+      const ok = sameValues(before, expectedBefore);
+      checks.push({ name: 'valores reales iguales a los del ensayo', ok });
+      if (!ok) throw new NotWritable('stale', 'Los valores reales de la remesa cambiaron desde el ensayo', before, checks);
+    }
+    if (withFields && sameValues(before, wantOf(change))) {
+      checks.push({ name: 'la remesa aún no tiene los valores nuevos', ok: false });
+      throw new NotWritable('stale', 'La remesa ya tiene esos valores (ya ajustado)', before, checks);
+    }
+
     const page = await client.request(TARIFF_PAGE);
     const st = describePage(page.text);
     if (st.looksLikeLogin) throw new SilogWebError('WEB_BAD_PAGE', 'Silogtran devolvió el login en lugar de la pantalla de cambio de tarifa (sesión expirada o sin permiso)');
@@ -94,7 +142,7 @@ export class SilogtranWebWriter implements SilogtranWriter {
     const wanted = change.remesaCode.replace(/\D/g, '').replace(/^0+/, '');
     const sugg = await prado.suggest(codeField, change.remesaCode.replace(/\D/g, '').padStart(10, '0'));
     const exact = sugg.filter((s) => Object.values(s.attrs).some((v) => v.replace(/\D/g, '').replace(/^0+/, '') === wanted && /^\d+$/.test(v.replace(/^0+/, '') || '0')) || s.cells.some((c) => c.replace(/\D/g, '').replace(/^0+/, '') === wanted && /^\d+$/.test(c)));
-    if (exact.length !== 1) throw new NotWritable('rejected', exact.length === 0 ? 'La remesa no aparece en el autocompletado de Silogtran' : 'Varias coincidencias para la remesa: no se escribe');
+    if (exact.length !== 1) throw new NotWritable('rejected', exact.length === 0 ? 'La remesa no aparece en el autocompletado de Silogtran' : 'Varias coincidencias para la remesa: no se escribe', before, checks);
     checks.push({ name: 'remesa encontrada con coincidencia exacta', ok: true });
     prado.select(exact[0] as { attrs: Record<string, string> });
     prado.fields[noteField] = change.reason;
@@ -106,18 +154,12 @@ export class SilogtranWebWriter implements SilogtranWriter {
     if (describePage(res.text).looksLikeLogin) throw new SilogWebError('WEB_BAD_PAGE', 'La sesión expiró durante la búsqueda');
 
     const rs = rows(prado);
-    if (rs.length !== 1) throw new NotWritable('rejected', `La búsqueda devolvió ${rs.length} ítems; se esperaba exactamente 1`);
+    if (rs.length !== 1) throw new NotWritable('rejected', `La búsqueda devolvió ${rs.length} ítems; se esperaba exactamente 1`, before, checks);
     const row = rs[0] as Row;
     for (const k of ['anterior_peso', 'anterior_cantidad', 'anterior_tarifa', 'nuevo_peso', 'nuevo_cantidad', 'nueva_tarifa']) {
       if (!row.names[k]) throw new SilogWebError('WEB_BAD_PAGE', `Falta el campo ${k} en la tabla de ítems`);
     }
-    const before = beforeOf(prado, row);
-    checks.push({ name: 'un solo ítem con valores anteriores legibles', ok: normalizeNumberString(before.peso) !== null && normalizeNumberString(before.tarifa) !== null, detail: `peso ${before.peso}, cantidad ${before.cantidad}, tarifa ${before.tarifa}` });
-    if (expectedBefore && !sameValues(before, expectedBefore)) {
-      checks.push({ name: 'valores anteriores iguales a los del ensayo', ok: false });
-      throw new NotWritable('stale', 'Los valores anteriores de la pantalla cambiaron desde el ensayo', before, checks);
-    }
-    if (expectedBefore) checks.push({ name: 'valores anteriores iguales a los del ensayo', ok: true });
+    checks.push({ name: 'un solo ítem en la pantalla de cambio', ok: true });
 
     if (withFields) {
       // Validación del lado servidor que Silogtran no hace: todo se comprueba aquí antes de fijar los campos.
@@ -169,20 +211,21 @@ export class SilogtranWebWriter implements SilogtranWriter {
         log('silog_web.grabar', { verdict: verdict.verdict });
         let after: ScreenValues | null = null;
         try {
-          after = await this.readBack(s.client, change);
+          after = toValues(await readRemesaHome(s.client, change.remesaCode, true)); // verificación en la consulta de la remesa
         } catch {
           after = null; // no se pudo releer: incierto
         }
-        const want: ScreenValues = { peso: change.pesoRemesa, cantidad: change.cantidadRemesa, tarifa: change.nuevaTarifa };
-        if (after && sameValues(after, want)) {
-          return verdict.verdict === 'success'
-            ? { outcome: 'applied', before: prep.before, detail: verdict.lines.join(' | ') }
-            : { outcome: 'uncertain', before: prep.before, detail: `Los valores cambiaron pero el mensaje de Silogtran no es el esperado (${verdict.verdict}): ${verdict.lines.join(' | ') || 'sin mensaje'}` };
+        const want = wantOf(change);
+        const matches = !!after && sameValues(after, want);
+        const fields = after ? fieldChecks(after, want, change.valorTotal) : undefined;
+        const said = verdict.lines.join(' | ') || 'sin mensaje';
+        if (verdict.verdict === 'success' && matches) return { outcome: 'applied', before: prep.before, after: after as ScreenValues, detail: `${said}; verificado en la consulta de la remesa` };
+        if (verdict.verdict === 'success' && after && !matches) {
+          return { outcome: 'verification_failed', before: prep.before, after, detail: `Silogtran dijo éxito pero la consulta no coincide: ${JSON.stringify(fields)}` };
         }
-        if (after && sameValues(after, prep.before) && verdict.verdict === 'error') {
-          return { outcome: 'rejected', before: prep.before, detail: `Silogtran no aplicó el cambio: ${verdict.lines.join(' | ')}` };
-        }
-        return { outcome: 'uncertain', before: prep.before, detail: `No se pudo confirmar el resultado de Grabar (${verdict.verdict}): ${verdict.lines.join(' | ') || 'sin mensaje'}` };
+        if (matches) return { outcome: 'uncertain', before: prep.before, detail: `Los valores cambiaron pero el mensaje de Silogtran no es el esperado (${verdict.verdict}): ${said}` };
+        if (after && sameValues(after, prep.before) && verdict.verdict === 'error') return { outcome: 'rejected', before: prep.before, detail: `Silogtran no aplicó el cambio: ${said}` };
+        return { outcome: 'uncertain', before: prep.before, detail: `No se pudo confirmar el resultado de Grabar (${verdict.verdict}): ${said}` };
       });
     } finally {
       await s.close();
@@ -203,27 +246,22 @@ export class SilogtranWebWriter implements SilogtranWriter {
     }
   }
 
-  /** Vuelve a buscar la remesa (sin fijar campos) y lee los valores que la pantalla muestra ahora. */
-  private async readBack(client: SilogWebClient, change: TariffChange): Promise<ScreenValues> {
-    const prep = await this.prepare(client, { ...change, reason: change.reason }, null, false);
-    return prep.before;
-  }
-
-  async getChangeState(_remesa: string, change: TariffChange, ctx: WriteContext = { actor: null }): Promise<'applied' | 'not_applied' | 'unknown'> {
+  /** Lee Home_111 y compara por campo: aplicado / no aplicado / desconocido (con detalle de lo parcial). Solo lectura. */
+  async getChangeState(_remesa: string, change: TariffChange, ctx: WriteContext = { actor: null }): Promise<ChangeStateResult> {
     const s = await this.open(ctx.actor);
     try {
-      return await s.client.enqueue(async () => {
-        let now: ScreenValues;
-        try {
-          now = await this.readBack(s.client, change);
-        } catch {
-          return 'unknown' as const;
-        }
-        const want: ScreenValues = { peso: change.pesoRemesa, cantidad: change.cantidadRemesa, tarifa: change.nuevaTarifa };
-        if (sameValues(now, want)) return 'applied' as const;
-        if (ctx.expectedBefore && sameValues(now, ctx.expectedBefore)) return 'not_applied' as const;
-        return 'unknown' as const;
-      });
+      let now: ScreenValues;
+      try {
+        now = toValues(await readRemesaHome(s.client, change.remesaCode));
+      } catch (e) {
+        return { state: 'unknown', detail: e instanceof SilogWebError ? `No se pudo leer la remesa (${e.code})` : 'No se pudo leer la remesa' };
+      }
+      const want = wantOf(change);
+      const fields = fieldChecks(now, want, change.valorTotal);
+      if (sameValues(now, want)) return { state: 'applied', fields };
+      if (ctx.expectedBefore && sameValues(now, ctx.expectedBefore)) return { state: 'not_applied', fields };
+      const partial = ['peso', 'cantidad', 'tarifa'].some((k) => (fields[k] as FieldCheck).ok);
+      return { state: 'unknown', fields, detail: partial ? 'Cambio parcial o mezcla de valores: revise la consulta de la remesa' : 'Los valores no coinciden ni con los nuevos ni con los anteriores' };
     } finally {
       await s.close();
     }

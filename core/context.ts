@@ -15,6 +15,8 @@ import { MockSilogAuth, SilogApiAuth } from './silogAuth.js';
 import type { SilogAuthClient } from './silogAuth.js';
 import { MockSilogtranWriter } from './adjust/writer.js';
 import { SilogtranWebWriter } from './silog/web/writer.js';
+import { SnapshotHomeReader, WebHomeReader } from './silog/web/homeReader.js';
+import type { HomeReader } from './adjust/service.js';
 import type { SilogtranWriter } from './adjust/writer.js';
 import { HttpWafSolver } from './silog/web/waf.js';
 import type { WafSolver } from './silog/web/waf.js';
@@ -38,8 +40,8 @@ export interface AppContext {
   writer: SilogtranWriter;
   /** Escritor REAL (se usa solo si el modo guardado en BD es `web`). */
   webWriter: SilogtranWriter;
-  /** Solo pruebas: espera entre relecturas del informe tras escribir. */
-  verifyDelayMs?: number;
+  /** Lectura de los valores reales de las remesas (consulta Home_111; en demo, derivada del snapshot). */
+  homeReader: HomeReader;
   /** Resolvedor del reto AWS WAF para el login web de Silogtran (HTTP a api/silog-waf, o Chromium local). */
   waf: WafSolver | null;
   /** Solo pruebas: fetch alterno para el cliente web de Silogtran. */
@@ -183,6 +185,9 @@ export async function createContext(env: Record<string, string | undefined> = pr
   const webBase = sg.webBaseUrl || (sg.baseUrl ? new URL(sg.baseUrl).origin : '');
   const out: AppContext = {
     config, db, mail, storage, auth, silog, silogAuth, writer, waf,
+    homeReader: webBase && config.security.encryptionKey
+      ? new WebHomeReader({ db, encryptionKey: config.security.encryptionKey, baseUrl: webBase, waf, fetchFn: () => out.webFetch })
+      : new SnapshotHomeReader(db),
     webWriter: new SilogtranWebWriter({ db, encryptionKey: config.security.encryptionKey, baseUrl: webBase, waf, fetchFn: () => out.webFetch }),
   };
   return out;

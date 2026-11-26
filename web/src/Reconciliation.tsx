@@ -227,6 +227,7 @@ export function Reconciliation({ cfg, me }: { cfg: PublicConfigDto; me: MeDto })
           <label>Hasta<input type="date" data-testid="recon-to" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} /></label>
           <button className="primary" onClick={start} disabled={!canWrite || driving} data-testid="recon-button">{driving ? 'Conciliando…' : 'Conciliar'}</button>
         </div>
+        <p className="muted" data-testid="recon-informe-note">El informe de Silogtran no refleja los ajustes de peso/cantidad: la comparación definitiva se hace al proponer ajustes.</p>
         {!canWrite && <p className="muted">Su rol es de solo lectura.</p>}
         {driving && progress && <p data-testid="recon-progress"><progress value={progress.value} max={progress.max} /> {progress.text}</p>}
         {notice && (

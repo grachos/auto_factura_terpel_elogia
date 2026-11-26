@@ -56,9 +56,21 @@ Implementa la secuencia anterior. Un único método (`postGrabar`) envía Grabar
 
 ### Qué se verifica tras grabar
 - Mensaje de Grabar: solo un texto de éxito reconocido cuenta como éxito; cualquier mensaje desconocido o ambiguo deja la propuesta `uncertain` (nunca éxito).
-- Relectura de la pantalla (Buscar de nuevo): `anterior_*` deben ser los valores nuevos.
-- Relectura del informe (hasta 3 lecturas separadas por unos segundos): `remesa_peso` = galones y `total_remesa` = valor de Terpel; si no coincide → `verification_failed` (no se factura).
+- Relectura de la CONSULTA de la remesa (Home_111): Peso, Peso Bruto y tarifa_cliente deben ser los valores nuevos; si no coincide → `verification_failed` (no se factura). El informe NO se usa (no refleja estos campos).
 - Si la respuesta se pierde o el mensaje es ambiguo → `uncertain`: se usa «Consultar estado» (relee la pantalla) antes de cualquier reintento; jamás hay reintento ciego.
 
 ### Revertir
 En una propuesta aplicada de verdad (o con verificación fallida/incierta) pulsar **Revertir**: crea una propuesta de reversa con los valores anteriores guardados (para la remesa de prueba: peso 10500, cantidad 10500, tarifa 235) que se aprueba, se ensaya y se aplica como cualquier otra (la reversa se verifica en la pantalla). Procedimiento manual de respaldo: abrir la pantalla «Procedimiento de Cambio Tarifa» con la remesa, escribir esos valores y grabar con la razón «Reversa de ajuste de tarifa».
+
+## Corrección tras la primera escritura real (verificación en la consulta de la remesa)
+Hechos de la primera escritura real (remesa 0101228393): Silogtran respondió «La remesa #0101228393 fue actualizado con &eacute;xito!» (la entidad HTML impidió reconocerlo), el cambio sí se aplicó y **el informe (`InformeGeneral`) NO cambia**: `remesa_peso` y `total_remesa` del informe no reflejan estos campos. Por eso:
+- **La verificación pasa a la consulta de la remesa** (`index.php?page=Despacho.Remesa_003.Home_111&remesa_codigo=<código de 10 dígitos>`, solo GET). Se lee por NOMBRE de columna (no por posición) la tabla `ctl0_MainModule_ItemsRemesa` y dos campos:
+  - Columna **Peso** y columna **Peso Bruto**: tras el cambio ambas quedan con el valor nuevo (en la remesa de prueba: 10487 y 10487). El escritor trata `nuevo_peso` ↔ **Peso** y `nuevo_cantidad` ↔ **Peso Bruto** (inferencia observada: el cambio deja el mismo valor en las dos).
+  - Columna **Cantidad**: es la cantidad ORIGINAL de la solicitud (10500) y el cambio de tarifa no la modifica; también explica por qué `anterior_cantidad` de la pantalla de cambio sigue en 10500.
+  - `ctl0_MainModule_tarifa_cliente` (texto): la tarifa; en la remesa de prueba **235**.
+  - `ctl0$MainModule$remesa_flete` (input; Silogtran lo muestra con comas de miles): el flete/total de la remesa; en la remesa de prueba **2,464,445** (= 10487 × 235 = valor de Terpel).
+- **Verificación exacta**: peso, cantidad (Peso Bruto) y tarifa son comprobaciones duras; el flete se compara con el valor de Terpel y se informa (campo `flete` del detalle) pero NO decide el resultado, porque con una sola remesa observada no se puede asegurar que el flete siempre sea tarifa × galones.
+- **Estados**: éxito reconocido + consulta coincide → `applied`; éxito reconocido pero la consulta no coincide → `verification_failed`; mensaje desconocido, respuesta perdida o consulta ilegible → `uncertain` (se resuelve con «Consultar estado», que lee la consulta y devuelve el detalle por campo; una mezcla parcial queda `unknown`).
+- **Clasificador de Grabar**: decodifica entidades HTML (`&eacute;`, `&nbsp;`, numéricas) y reconoce «La remesa #<código> fue actualizado con éxito!» (cualquier mayúscula/acento/contenedor, también dentro de un script); todo lo demás es `uncertain`.
+- **El informe ya no se usa para verificar ni para los «valores actuales»**: solo se exige que el registro siga CUMPLIDO, sin factura y que sea la remesa. Al GENERAR propuestas se leen los valores reales de cada remesa en la consulta (sesión web, concurrencia 1): si no se pueden leer → `needs_review` con `CURRENT_VALUES_UNAVAILABLE`; si peso, cantidad y tarifa ya son los esperados → no se propone (etiqueta «Ya ajustado», `ALREADY_ADJUSTED`). La reversa guarda los valores leídos de la consulta (Peso, Peso Bruto, tarifa).
+- **Limitación de la conciliación (Fase 2)**: su comparación de volumen contra `remesa_peso` del informe es solo informativa: el informe no refleja los ajustes de peso/cantidad; la comparación definitiva se hace al proponer ajustes.

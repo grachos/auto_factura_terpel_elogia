@@ -162,6 +162,7 @@ test('Fase 3: facturación genera, simula, aprueba y aplica (simulado); banner y
   await page.getByTestId('nav-recon').click();
   await page.getByTestId('recon-from').fill('2026-01-01');
   await page.getByTestId('recon-to').fill('2026-01-31');
+  await expect(page.getByTestId('recon-informe-note')).toContainText('no refleja');
   await page.getByTestId('recon-button').click();
   await expect(page.getByTestId('recon-status')).toContainText('Completada', { timeout: 30_000 });
 
@@ -171,7 +172,7 @@ test('Fase 3: facturación genera, simula, aprueba y aplica (simulado); banner y
   await expect(row).toContainText('Propuesta');
   await row.click();
   await expect(page.getByTestId('adj-detail')).toContainText('Nueva Tarifa');
-  await expect(page.getByTestId('adj-detail')).toContainText('no disponible en el informe');
+  await expect(page.getByTestId('adj-detail')).toContainText('Cantidad Remesa');
   await page.getByTestId('adj-simulate').click();
   await expect(page.getByTestId('adj-preview')).toContainText('"nuevaTarifa": "250"');
   await page.getByTestId('adj-approve').click();

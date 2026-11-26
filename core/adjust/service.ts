@@ -13,16 +13,22 @@ import type {
 } from '../types.js';
 import { computeTariff, normalizeNumberString } from './tariff.js';
 import type { RehearsalResult, ScreenValues, SilogtranWriter, TariffChange } from './writer.js';
+import type { RemesaState } from '../silog/web/remesa.js';
 
 export const ADJUST_RULES_VERSION = 'adjust-1.0.0';
+
+/** Valores reales de las remesas (Home_111). `error` = no se pudo leer (la propuesta queda en revisión; nunca se asume). */
+export interface HomeReader {
+  readMany(codes: string[], actor: string | null, budgetMs: number): Promise<Map<string, RemesaState | { error: string }>>;
+}
 
 export interface AdjustDeps {
   db: Db;
   storage: StorageAdapter;
   silog: SilogtranSource | null;
   writer: SilogtranWriter;
-  /** Espera entre relecturas del informe tras escribir (por defecto 4 s; las pruebas usan 0). */
-  verifyDelayMs?: number;
+  /** Lectura de los valores REALES de cada remesa (consulta Home_111). */
+  homeReader?: HomeReader | null;
   /** Remesas permitidas para la escritura real (se evalúa solo si writer.kind === 'web'). */
   allow?: { all: boolean; list: string[] };
 }
@@ -294,31 +300,40 @@ export async function generateProposals(deps: AdjustDeps, runId: string, actor: 
     [rr.from, rr.to],
   );
   const sum: GenerateSummary = { created: 0, refreshed: 0, unchanged: 0, needsReview: 0, staled: 0, total: rows.rows.length };
+  // Valores REALES de cada remesa (consulta Home_111): el informe no refleja el peso/cantidad que cambia este ajuste.
+  const codes = [...new Set(rows.rows.map((r) => r.remesa_code))];
+  const states = deps.homeReader ? await deps.homeReader.readMany(codes, actor, 40_000) : new Map<string, RemesaState | { error: string }>();
   for (const s of rows.rows) {
     const weightSource = s.weight_source ?? 'terpel';
     const gallonsRaw = weightSource === 'silogtran' ? s.rw : s.vol;
     const t = computeTariff(s.nv, gallonsRaw);
+    const home = states.get(s.remesa_code);
+    const homeOk = home && !('error' in home) ? home : null;
     let reviewCode: string | null = null;
     let reviewDetail: string | null = null;
-    if (!t.ok) { reviewCode = t.code; reviewDetail = t.detail; }
+    if (!homeOk) { reviewCode = 'CURRENT_VALUES_UNAVAILABLE'; reviewDetail = `No se pudieron leer los valores reales de la remesa en Silogtran${home && 'error' in home ? ` (${home.error})` : ''}; no se asumen`; }
+    else if (!t.ok) { reviewCode = t.code; reviewDetail = t.detail; }
     else if ((s.sstatus ?? '').toUpperCase() !== 'CUMPLIDO') { reviewCode = 'NOT_CUMPLIDO'; reviewDetail = 'El registro de Silogtran ya no está CUMPLIDO'; }
     else if (s.invoice) { reviewCode = 'ALREADY_INVOICED'; reviewDetail = 'El registro de Silogtran ya tiene factura'; }
+    else if (same(homeOk.peso, t.gallons) && same(homeOk.pesoBruto, t.gallons) && same(homeOk.tarifa, t.tariff)) {
+      reviewCode = 'ALREADY_ADJUSTED'; reviewDetail = 'Ya ajustado: el peso, la cantidad y la tarifa reales de la remesa ya son los esperados; no se propone ajuste';
+    }
     const gallons = t.ok ? t.gallons : normalizeNumberString(gallonsRaw);
     const target = normalizeNumberString(s.nv);
     const reason = renderReason(settings.reasonTemplate, { transport: s.transport_number, expense: s.expense_number, remesa: s.remesa_code, manifest: s.manifest });
-    const curW = normalizeNumberString(s.rw);
-    const curT = normalizeNumberString(s.tr);
+    const curW = homeOk ? homeOk.peso : null;
+    const curT = homeOk ? homeOk.flete : null;
     const lines: ProposalLineDto[] = [
-      { field: 'pesoRemesa', label: 'Peso Remesa', current: curW, proposed: gallons, rule: weightSource === 'silogtran' ? 'Volumen de Terpel en 0: se conserva el peso de Silogtran' : 'Peso Remesa = galones indicados por Terpel' },
-      { field: 'cantidadRemesa', label: 'Cantidad Remesa', current: null, proposed: gallons, rule: 'Cantidad Remesa = Peso Remesa (el valor actual no está disponible en el informe)' },
-      { field: 'nuevaTarifa', label: 'Nueva Tarifa', current: normalizeNumberString(s.rate), proposed: t.ok ? t.tariff : null, rule: 'Valor neto de Terpel ÷ galones, decimal exacto de hasta 12 caracteres (punto decimal)' },
-      { field: 'totalRemesa', label: 'Total de la remesa', current: curT, proposed: target, rule: 'El total debe quedar idéntico al valor neto de Terpel (tarifa × galones, sin tolerancia)' },
+      { field: 'pesoRemesa', label: 'Peso Remesa', current: homeOk?.peso ?? null, proposed: gallons, rule: weightSource === 'silogtran' ? 'Volumen de Terpel en 0: se conserva el peso de Silogtran' : 'Peso Remesa = galones indicados por Terpel' },
+      { field: 'cantidadRemesa', label: 'Cantidad Remesa', current: homeOk?.pesoBruto ?? null, proposed: gallons, rule: 'Cantidad Remesa = Peso Remesa (en la consulta de la remesa es la columna «Peso Bruto»)' },
+      { field: 'nuevaTarifa', label: 'Nueva Tarifa', current: homeOk?.tarifa ?? null, proposed: t.ok ? t.tariff : null, rule: 'Valor neto de Terpel ÷ galones, decimal exacto de hasta 12 caracteres (punto decimal)' },
+      { field: 'totalRemesa', label: 'Total de la remesa (flete)', current: curT, proposed: target, rule: 'Referencia: tarifa × galones debe reproducir el valor de Terpel (el flete se lee en la consulta de la remesa)' },
     ];
     const elig = autoEligibility({
       resultStatus: 'MATCH_WITH_DIFFERENCES', candidateCount: s.candidate_ids.length, differences: s.differences, weightSource, terpelVolume: s.vol,
-      tariffOk: t.ok, recordStatus: s.sstatus, invoice: s.invoice, complete: !!(s.remesa_code && s.transport_number && gallons && target),
+      tariffOk: t.ok && !!homeOk, recordStatus: s.sstatus, invoice: s.invoice, complete: !!(s.remesa_code && s.transport_number && gallons && target),
     });
-    const key = keyOf(s.service_id, s.authorization_id, gallons ?? '-', t.ok ? t.tariff : `x:${reviewCode}`, target ?? '-');
+    const key = keyOf(s.service_id, s.authorization_id, gallons ?? '-', t.ok && reviewCode !== 'CURRENT_VALUES_UNAVAILABLE' ? t.tariff : `x:${reviewCode}`, target ?? '-');
     const status: ProposalStatus = reviewCode ? 'needs_review' : 'proposed';
     if (reviewCode) sum.needsReview += 1;
     await db.transaction(async (tx) => {
@@ -390,7 +405,7 @@ async function adjustAccount(db: Db): Promise<string | null> {
 }
 
 function changeOf(p: ProposalRow): TariffChange {
-  return { remesaCode: p.remesa_code as string, reason: p.reason as string, pesoRemesa: clean(p.gallons) as string, cantidadRemesa: (clean(p.quantity) ?? clean(p.gallons)) as string, nuevaTarifa: p.tariff as string };
+  return { remesaCode: p.remesa_code as string, reason: p.reason as string, pesoRemesa: clean(p.gallons) as string, cantidadRemesa: (clean(p.quantity) ?? clean(p.gallons)) as string, nuevaTarifa: p.tariff as string, valorTotal: p.kind === 'reversal' ? null : clean(p.target_value) };
 }
 
 /** Qué se enviaría exactamente. No escribe ni cambia estado. */
@@ -432,10 +447,6 @@ const same = (a: unknown, b: unknown): boolean => {
   return x !== null && y !== null && x === y;
 };
 
-function verify(fresh: SilogRecordInput | null, p: ProposalRow): { ok: boolean; weight: unknown; total: unknown } {
-  return { ok: !!fresh && same(fresh.remesa_weight, p.gallons) && same(fresh.total_remesa, p.target_value), weight: fresh?.remesa_weight ?? null, total: fresh?.total_remesa ?? null };
-}
-
 export interface ApplyOutcome { proposal: ProposalDto }
 
 const sha = (o: unknown): string => createHash('sha256').update(JSON.stringify(o)).digest('hex');
@@ -475,7 +486,7 @@ export async function rehearseProposal(deps: AdjustDeps, actor: string, id: stri
   if (deps.silog) {
     const fresh = await readFresh(deps, p);
     const why = staleWhy(fresh, p);
-    checks.push({ name: 'registro del informe vigente (CUMPLIDO, sin factura, mismos valores)', ok: !why, detail: why ?? undefined });
+    checks.push({ name: 'registro del informe vigente (CUMPLIDO, sin factura, es la remesa)', ok: !why, detail: why ?? undefined });
   } else checks.push({ name: 'registro del informe vigente', ok: false, detail: 'Silogtran (lectura) no está configurado' });
   // (b) Pantalla: todos los pasos menos Grabar.
   const res: RehearsalResult = await deps.writer.rehearse(change, { actor });
@@ -486,11 +497,12 @@ export async function rehearseProposal(deps: AdjustDeps, actor: string, id: stri
   return { proposalId: id, simulated: res.simulated, writerKind: deps.writer.kind, payload: change, before: res.before, checks, allChecksOk, wouldPostGrabar: false };
 }
 
+/** El informe de Silogtran NO refleja el peso/cantidad que cambia este ajuste: solo se exige que el registro siga siendo la remesa, CUMPLIDO y sin factura. */
 function staleWhy(fresh: SilogRecordInput | null, claimed: ProposalRow): string | null {
   return !fresh ? 'El registro ya no aparece en Silogtran'
+    : fresh.remesa_code.replace(/^0+/, '') !== (claimed.remesa_code ?? '').replace(/^0+/, '') ? 'El registro no corresponde a la remesa de la propuesta'
     : fresh.status !== 'CUMPLIDO' ? 'El registro ya no está CUMPLIDO'
     : fresh.invoice ? 'El registro ya tiene factura'
-    : !same(fresh.remesa_weight, claimed.current_weight) || !same(fresh.total_remesa, claimed.current_total) ? 'Los valores de Silogtran cambiaron desde la propuesta'
     : null;
 }
 
@@ -551,7 +563,9 @@ export async function applyProposal(deps: AdjustDeps, actor: string, id: string)
     throw e instanceof SilogWebError ? new AppError(e.status, e.code, e.message) : e;
   }
   const reversal = 'before' in result && result.before ? { reversal_values: result.before } : {};
-  if (result.outcome === 'stale') {
+  if (result.outcome === 'verification_failed') {
+    await move(db, id, ['applying'], 'verification_failed', actor, 'verification_failed', { lease_until: null, applied_at: new Date().toISOString(), last_error: result.detail, verification: { ok: false, source: 'home_111', detail: result.detail }, ...reversal }, { detail: result.detail, after: result.after ?? null });
+  } else if (result.outcome === 'stale') {
     await move(db, id, ['applying'], 'stale', actor, 'stale', { lease_until: null, last_error: result.detail, ...reversal }, { reason: result.detail, before: result.before ?? null });
   } else if (result.outcome === 'rejected' || result.outcome === 'conflict') {
     await move(db, id, ['applying'], 'failed', actor, result.outcome, { lease_until: null, last_error: result.detail, ...reversal }, { detail: result.detail });
@@ -559,15 +573,13 @@ export async function applyProposal(deps: AdjustDeps, actor: string, id: string)
     await move(db, id, ['applying'], 'uncertain', actor, 'uncertain', { lease_until: null, last_error: result.detail, ...reversal }, { detail: result.detail, before: result.before ?? null });
   } else {
     if (reversal.reversal_values) await db.query('update adjustment_proposals set reversal_values = $2::jsonb where id = $1', [id, JSON.stringify(reversal.reversal_values)]);
-    await finalizeApplied(deps, actor, { ...claimed, reversal_values: (reversal.reversal_values as ScreenValues | undefined) ?? claimed.reversal_values });
+    await finalizeApplied(deps, actor, { ...claimed, reversal_values: (reversal.reversal_values as ScreenValues | undefined) ?? claimed.reversal_values }, (result as { after?: ScreenValues }).after ? { after: (result as { after?: ScreenValues }).after } : undefined);
   }
   await audit(db, actor, 'adjustment.apply', 'adjustment_proposal', id, { simulated: deps.writer.simulated, outcome: result.outcome, writer: deps.writer.kind });
   return { proposal: await getProposal(db, id) };
 }
 
-const sleep = (ms: number): Promise<void> => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve());
-
-async function finalizeApplied(deps: AdjustDeps, actor: string, p: ProposalRow): Promise<void> {
+async function finalizeApplied(deps: AdjustDeps, actor: string, p: ProposalRow, fields?: Record<string, unknown>): Promise<void> {
   const now = new Date().toISOString();
   if (deps.writer.simulated) {
     await move(deps.db, p.id, ['applying', 'uncertain'], 'simulated_applied', actor, 'simulated_applied', {
@@ -575,28 +587,10 @@ async function finalizeApplied(deps: AdjustDeps, actor: string, p: ProposalRow):
     }, { note: 'simulado' });
     return;
   }
-  if (p.kind === 'reversal') {
-    // La reversa se verifica en la pantalla (el informe no tiene un valor de referencia estable).
-    const st = await deps.writer.getChangeState(p.remesa_code as string, changeOf(p), { actor, expectedBefore: null });
-    await move(deps.db, p.id, ['applying', 'uncertain'], st === 'applied' ? 'applied' : 'verification_failed', actor, st === 'applied' ? 'applied' : 'verification_failed', {
-      lease_until: null, applied_at: now, verification: { screen: st }, ...(st === 'applied' ? {} : { last_error: 'No se pudo confirmar la reversa en la pantalla' }),
-    }, { screen: st });
-    return;
-  }
-  // Informe: hasta 3 lecturas separadas por unos segundos (el informe puede tardar en reflejar el cambio).
-  const delay = deps.verifyDelayMs ?? 4000;
-  let v = verify(await readFresh(deps, p), p);
-  for (let i = 0; i < 2 && !v.ok; i += 1) {
-    await sleep(delay);
-    v = verify(await readFresh(deps, p), p);
-  }
-  if (v.ok) {
-    await move(deps.db, p.id, ['applying', 'uncertain'], 'applied', actor, 'applied', { lease_until: null, applied_at: now, verification: { ok: true } }, { weight: v.weight, total: v.total });
-  } else {
-    await move(deps.db, p.id, ['applying', 'uncertain'], 'verification_failed', actor, 'verification_failed', {
-      lease_until: null, applied_at: now, verification: { ok: false, weight: v.weight, total: v.total }, last_error: 'La verificación posterior no coincide: no se factura',
-    }, { weight: v.weight, total: v.total });
-  }
+  // La verificación real se hizo en la consulta de la remesa (Home_111) dentro del escritor; el informe no refleja estos campos.
+  await move(deps.db, p.id, ['applying', 'uncertain'], 'applied', actor, 'applied', {
+    lease_until: null, applied_at: now, verification: { ok: true, source: 'home_111', ...(fields ? { fields } : {}) },
+  }, fields ? { fields } : {});
 }
 
 /** Resuelve un 'uncertain' CONSULTANDO el estado antes de cualquier reintento. */
@@ -604,11 +598,11 @@ export async function checkUncertain(deps: AdjustDeps, actor: string, id: string
   await sweepExpiredLeases(deps.db);
   const p = await loadRow(deps.db, id);
   if (p.status !== 'uncertain') throw new AppError(409, 'INVALID_TRANSITION', `Solo se consulta el estado de propuestas inciertas (estado ${p.status})`);
-  const state = await deps.writer.getChangeState(p.remesa_code as string, changeOf(p), { actor, expectedBefore: p.reversal_values });
-  if (state === 'applied') await finalizeApplied(deps, actor, p);
-  else if (state === 'not_applied') await move(deps.db, id, ['uncertain'], 'failed', actor, 'checked_not_applied', { last_error: 'Confirmado: el cambio no se aplicó' }, {});
-  else await addEvent(deps.db, id, actor, 'check_unknown', 'uncertain', 'uncertain', p.simulated, {});
-  await audit(deps.db, actor, 'adjustment.check', 'adjustment_proposal', id, { state });
+  const res = await deps.writer.getChangeState(p.remesa_code as string, changeOf(p), { actor, expectedBefore: p.reversal_values });
+  if (res.state === 'applied') await finalizeApplied(deps, actor, p, res.fields as Record<string, unknown> | undefined);
+  else if (res.state === 'not_applied') await move(deps.db, id, ['uncertain'], 'failed', actor, 'checked_not_applied', { last_error: 'Confirmado: el cambio no se aplicó' }, { fields: res.fields ?? null });
+  else await addEvent(deps.db, id, actor, 'check_unknown', 'uncertain', 'uncertain', p.simulated, { detail: res.detail ?? null, fields: res.fields ?? null });
+  await audit(deps.db, actor, 'adjustment.check', 'adjustment_proposal', id, { state: res.state });
   return getProposal(deps.db, id);
 }
 
