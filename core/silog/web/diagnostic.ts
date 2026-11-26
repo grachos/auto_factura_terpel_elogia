@@ -75,6 +75,7 @@ export interface Step { step: string; ok: boolean; detail?: unknown }
 export interface AfterSearch { controls: ControlInfo[]; tables: TableInfo[]; widgets: WidgetInfo[]; messages: string[]; validators: WidgetInfo[] }
 export interface DiagnosticResult {
   page: string; reused: boolean; steps: Step[]; structure: PageStructure | null;
+  home?: HomeDescription;
   lookup: { requested: boolean; steps: Step[]; tables: TableInfo[]; numericFields: { name: string; value: string | null; disabled: boolean; readOnly: boolean }[]; afterSearch: AfterSearch | null } | null;
 }
 
@@ -121,13 +122,19 @@ export function summarizeFragments(frags: string[]): { tables: TableInfo[]; nume
  * Etapa 1: GET de la pantalla y su estructura. Etapa 2 (opcional): casilla/campo Remesa con pasos de lectura.
  * Cada paso se reporta. No hay ningún POST a botones y nunca se pulsa Grabar.
  */
-export async function runDiagnostic(client: SilogWebClient, opts: { lookup: boolean; search?: boolean; remesa: string; reused: boolean }): Promise<DiagnosticResult> {
+export async function runDiagnostic(client: SilogWebClient, opts: { lookup: boolean; search?: boolean; home?: boolean; remesa: string; reused: boolean }): Promise<DiagnosticResult> {
   const steps: Step[] = [];
   const page = await client.enqueue(() => client.request(TARIFF_PAGE));
   const structure = describePage(page.text);
   if (structure.looksLikeLogin) throw new SilogWebError('WEB_BAD_PAGE', 'Silogtran devolvió la pantalla de login en lugar de la pantalla de cambio de tarifa (sesión no válida o sin permiso)');
   steps.push({ step: 'GET pantalla de cambio de tarifa', ok: true, detail: { controls: structure.controls.length, widgets: structure.widgets.length, tables: structure.tables.length } });
   const result: DiagnosticResult = { page: TARIFF_PAGE, reused: opts.reused, steps, structure, lookup: null };
+  if (opts.home) {
+    // Página de CONSULTA (solo GET): lo que Silogtran guarda de verdad para la remesa.
+    const hp = await client.enqueue(() => client.request(`${HOME_PAGE}${opts.remesa.padStart(10, '0')}`));
+    result.home = describeRemesaHome(hp.text);
+    steps.push({ step: 'GET página de consulta de la remesa (Home_111)', ok: true, detail: { tables: result.home.tables.length, fields: result.home.fields.length } });
+  }
   if (!opts.lookup && !opts.search) return result;
 
   const lookupSteps: Step[] = [];
@@ -199,4 +206,36 @@ export async function runDiagnostic(client: SilogWebClient, opts: { lookup: bool
     numericFields.push(...sumPage.numeric.filter((n) => !numericFields.some((x) => x.name === n.name)));
   });
   return result;
+}
+
+export const HOME_PAGE = 'index.php?page=Despacho.Remesa_003.Home_111&remesa_codigo=';
+
+export interface HomeTable { id: string | null; headers: string[]; rows: string[][] }
+export interface HomeDescription { tables: HomeTable[]; fields: { id: string | null; name: string | null; tag: string; value: string | null }[] }
+
+const cellText = (t: string): string => t.replace(/\s+/g, ' ').trim().slice(0, 80);
+
+/** Estructura de la página de CONSULTA de la remesa (Home_111): tabla de ítems por encabezado y campos de tarifa/flete. Solo lectura. */
+export function describeRemesaHome(html: string): HomeDescription {
+  const $ = cheerio.load(html);
+  const tables: HomeTable[] = [];
+  $('table').each((_, t) => {
+    const $t = $(t);
+    const id = $t.attr('id') ?? null;
+    if (!(id && /ItemsRemesa/i.test(id))) return;
+    const headers = $t.find('th').toArray().map((h) => cellText($(h).text()));
+    const rows = $t.find('tr').toArray().map((r) => $(r).find('td').toArray().map((c) => cellText($(c).text()))).filter((r) => r.length > 0);
+    tables.push({ id, headers, rows });
+  });
+  const fields: HomeDescription['fields'] = [];
+  $('input, span, td, select, textarea').each((_, el) => {
+    const $el = $(el);
+    const id = $el.attr('id') ?? null;
+    const name = $el.attr('name') ?? null;
+    if (!/tarifa_cliente|remesa_flete/i.test(`${id ?? ''} ${name ?? ''}`)) return;
+    const tag = (el as { tagName: string }).tagName;
+    if (tag === 'td' && !id) return;
+    fields.push({ id, name, tag, value: tag === 'input' ? ($el.attr('value') ?? '') : cellText($el.text()) });
+  });
+  return { tables, fields };
 }

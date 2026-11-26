@@ -336,7 +336,7 @@ async function dispatchAdjust(
     try {
       const s = await openWebSession({ db: ctx.db, encryptionKey: ctx.config.security.encryptionKey, baseUrl: base, waf: ctx.waf, fetchFn: ctx.webFetch }, purpose, session.userId);
       try {
-        const out = await runDiagnostic(s.client, { lookup, search, remesa, reused: s.reused });
+        const out = await runDiagnostic(s.client, { lookup, search, home: body.home === true, remesa, reused: s.reused });
         await audit(ctx.db, session.userId, 'silog_web.diagnostic', 'silog_web_session', purpose, { lookup, search, ok: true });
         return ok({ ok: true, wafSolved: s.client.wafSolved, ...out });
       } finally {
