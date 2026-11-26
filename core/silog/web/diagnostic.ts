@@ -5,6 +5,7 @@ import * as cheerio from 'cheerio';
 import { SilogWebError } from './errors.js';
 import type { SilogWebClient } from './client.js';
 import { PradoPage } from './prado.js';
+import { DEFAULT_INVOICE_PARAMS, fillInvoiceForm } from './invoice.js';
 
 export const TARIFF_PAGE = 'index.php?page=Despacho.Remesa_003.CambioTarifa_105';
 
@@ -268,10 +269,10 @@ export function describeInvoicePage(html: string): InvoicePageMap {
     if (tag === 'select') c.options = $el.find('option').toArray().slice(0, 40).map((o) => ({ value: $(o).attr('value') ?? '', text: $(o).text().trim().slice(0, 60), selected: $(o).is('[selected]') }));
     controls.push(c);
   });
-  const labelled = $('span[id], td[id], div[id]').toArray()
-    .filter((e) => /flete|total|impuesto|otros|retefuente|retelca|mensaje|error/i.test($(e).attr('id') ?? ''))
+  const labelled = $('span[id], td[id], div[id], label[id]').toArray()
+    .filter((e) => /flete|total|impuesto|otros|retefuente|retelca|mensaje|error|valor|suma|resta/i.test($(e).attr('id') ?? '') || /^[\d.,\-\s]+$/.test($(e).text().trim()))
     .map((e) => ({ id: $(e).attr('id') as string, text: $(e).text().replace(/\s+/g, ' ').trim().slice(0, 120) }))
-    .filter((x) => x.text !== '').slice(0, 40);
+    .filter((x) => x.text !== '' && x.text.length < 60).slice(0, 60);
   const tables: HomeTable[] = [];
   $('table').each((_, t) => {
     const $t = $(t);
@@ -300,12 +301,16 @@ export async function runInvoiceDiagnostic(client: SilogWebClient, remesa: strin
   const before = describeInvoicePage(page.text);
   steps.push({ step: 'GET pantalla de facturar', ok: true, detail: { controls: before.controls.length, tables: before.tables.length } });
   const out: InvoiceDiagnostic = { steps, before, after: null };
-  const comas = before.controls.find((c) => c.tag === 'textarea' && /coma/i.test(`${c.id ?? ''} ${c.name ?? ''}`)) ?? null;
+  const comas = before.controls.find((c) => c.tag === 'textarea' && /listadocumento|coma/i.test(`${c.id ?? ''} ${c.name ?? ''}`)) ?? null;
   const listar = before.controls.find(isListButton) ?? null;
   steps.push({ step: 'identificar «Búsqueda Por Comas» y «Listar Remesas»', ok: !!(comas?.name && listar?.name), detail: { textarea: comas?.id ?? null, button: listar?.name ?? null } });
   if (!comas?.name || !listar?.name) return out;
   await client.enqueue(async () => {
     const prado = new PradoPage(client, page);
+    // Configuración como la que escribe el usuario (en memoria): la validación de PRADO es solo del lado cliente.
+    const fill: { step: string; ok: boolean; detail?: unknown }[] = [];
+    const filled = await fillInvoiceForm(prado, { ...DEFAULT_INVOICE_PARAMS, observation: 'DIAGNOSTICO DE SOLO LECTURA', purchaseOrder: '0' }, fill);
+    steps.push(...fill, { step: 'configuración de la factura completa', ok: filled });
     prado.fields[comas.name as string] = remesa.padStart(10, '0');
     const lock = Object.keys(prado.fields).find((k) => /IDLockHidden_.*listar/i.test(k));
     const extra: Record<string, string> = { PRADO_POSTBACK_PARAMETER: '', [listar.name as string]: listar.value && listar.value !== '' ? listar.value : 'Listar Remesas' };
