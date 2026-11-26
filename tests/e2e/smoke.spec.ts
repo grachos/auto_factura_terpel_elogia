@@ -217,3 +217,25 @@ test('Incremento 3b: el banner refleja el modo del escritor (simulado / escritur
   await expect(page.getByTestId('sim-banner')).toBeVisible();
   await expect(page.getByTestId('real-banner')).toHaveCount(0);
 });
+
+test('Modo asistido: plan, confirmación explícita, corrida con progreso y reporte (escritor simulado)', async ({ page }) => {
+  await loginAs(page, 'operator');
+  await page.getByTestId('nav-adjust').click();
+  await expect(page.getByTestId('assisted-panel')).toHaveCount(0); // el operador no ejecuta el modo asistido
+  await page.getByTestId('logout').click();
+
+  await loginAs(page, 'admin');
+  await page.getByTestId('nav-adjust').click();
+  await page.getByTestId('adj-discard').click(); // descarta las simulaciones previas para volver a proponerlas
+  await page.getByTestId('assisted-plan-button').click();
+  await expect(page.getByTestId('assisted-sim-banner')).toContainText('MODO SIMULADO');
+  await expect(page.getByTestId('assisted-eligible-count')).not.toHaveText('0');
+  await expect(page.getByTestId('assisted-start')).toBeDisabled(); // sin confirmar no se puede iniciar
+  await page.getByTestId('assisted-confirm').check();
+  await page.getByTestId('assisted-start').click();
+  await expect(page.getByTestId('assisted-status')).toHaveText('Completada', { timeout: 30_000 });
+  await expect(page.getByTestId('assisted-item').first()).toContainText('Aplicada');
+  await expect(page.getByTestId('assisted-report-note')).toContainText('Facturación: pendiente');
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('assisted-download').click()]);
+  expect(download.suggestedFilename()).toMatch(/^asistido-.*\.xlsx$/);
+});

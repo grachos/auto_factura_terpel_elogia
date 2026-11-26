@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { AdjustSettingsDto, ApplyPreviewDto, MeDto, ProposalDto, ProposalEventDto, PublicConfigDto, ReconRunDto, RehearsalDto, WriterStatusDto } from '../../core/types';
 import { api } from './api';
+import { Assisted } from './Assisted';
 
 const STATUS_LABEL: Record<string, string> = {
   proposed: 'Propuesta', needs_review: 'Requiere revisión', approved: 'Aprobada', applying: 'Aplicando', applied: 'Aplicada',
@@ -139,6 +140,8 @@ export function Adjustments({ cfg: _cfg, me, writer, onWriter }: { cfg: PublicCo
         {approvable.length > 0 && <p className="muted">{approvable.length} propuesta(s) lista(s) para aplicar.</p>}
       </section>
 
+      <Assisted reconRunId={runId} me={me} writer={writer} onChanged={() => void load(runId)} />
+
       {settings && has('adjustments.view') && (
         <section className="card" aria-labelledby="adj-settings" data-testid="adj-settings">
           <h2 id="adj-settings">Razón de cambio y automático</h2>
@@ -148,7 +151,7 @@ export function Adjustments({ cfg: _cfg, me, writer, onWriter }: { cfg: PublicCo
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: '.4rem' }}>
               <input type="checkbox" checked={settings.autoEnabled} onChange={(e) => setSettings({ ...settings, autoEnabled: e.target.checked })} />
-              Permitir aplicación automática (gancho apagado por defecto; no hay orquestador todavía)
+              Reservado: aplicación sin intervención humana (apagado y NO implementado; el modo asistido siempre pide confirmación)
             </label>
             <label>Escritor de ajustes
               <select value={settings.writerMode} onChange={(e) => setSettings({ ...settings, writerMode: e.target.value as 'mock' | 'web' })} data-testid="adj-writer-mode">

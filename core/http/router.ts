@@ -4,6 +4,8 @@ import { isAppToken, verifyAppToken } from '../appAuth.js';
 import { can, permissionsOf } from '../permissions.js';
 import type { Permission } from '../permissions.js';
 import { silogLogin } from '../silogLogin.js';
+import { buildPlan, createAssistedRun, getAssistedRun, listAssistedRuns, stepAssistedRun } from '../adjust/assisted.js';
+import { generateAssistedExport } from '../adjust/assistedExcel.js';
 import { runDiagnostic } from '../silog/web/diagnostic.js';
 import { SilogWebError } from '../silog/web/errors.js';
 import { openWebSession } from '../silog/web/session.js';
@@ -206,7 +208,7 @@ async function dispatch(ctx: AppContext, req: HttpRequest, setRoute: (r: string)
       file: {
         data,
         contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        filename: p.startsWith('recon/') ? `conciliacion-${p.split('/')[1]?.slice(0, 8) ?? 'lote'}.xlsx` : `autorizaciones-${p.split('/')[0]?.slice(0, 8) ?? 'lote'}.xlsx`,
+        filename: p.startsWith('assisted/') ? `asistido-${p.split('/')[1]?.slice(0, 8) ?? 'corrida'}.xlsx` : p.startsWith('recon/') ? `conciliacion-${p.split('/')[1]?.slice(0, 8) ?? 'lote'}.xlsx` : `autorizaciones-${p.split('/')[0]?.slice(0, 8) ?? 'lote'}.xlsx`,
       },
     };
   }
@@ -354,6 +356,41 @@ async function dispatchAdjust(
   if (a === 'reconciliations' && c === 'adjustments' && parts.length === 4 && parts[3] === 'generate' && is('POST', '/reconciliations/:id/adjustments/generate')) {
     requirePermission(session, 'adjustments.generate');
     return ok(await generateProposals(deps, uid(b), session.userId));
+  }
+  const both = (): void => {
+    requirePermission(session, 'adjustments.approve');
+    requirePermission(session, 'adjustments.apply');
+  };
+  if (a === 'reconciliations' && c === 'assisted' && parts.length === 4 && parts[3] === 'plan' && is('POST', '/reconciliations/:id/assisted/plan')) {
+    both();
+    return ok(await buildPlan(deps, uid(b), session.userId));
+  }
+  if (a === 'assisted-runs') {
+    if (parts.length === 1 && is('GET', '/assisted-runs')) {
+      requirePermission(session, 'adjustments.view');
+      const rid = typeof req.query.reconRunId === 'string' && req.query.reconRunId !== '' ? uid(req.query.reconRunId) : undefined;
+      return ok({ runs: await listAssistedRuns(ctx.db, rid) });
+    }
+    if (parts.length === 1 && is('POST', '/assisted-runs')) {
+      both();
+      const body = asObject(req.body);
+      return ok(await createAssistedRun(deps, session.userId, { reconRunId: body.reconRunId, proposalIds: body.proposalIds, confirm: body.confirm }), 201);
+    }
+    if (parts.length === 2 && is('GET', '/assisted-runs/:id')) {
+      requirePermission(session, 'adjustments.view');
+      return ok(await getAssistedRun(ctx.db, uid(b)));
+    }
+    if (parts.length === 3 && c === 'step' && is('POST', '/assisted-runs/:id/step')) {
+      both();
+      const body = asObject(req.body ?? {});
+      const budget = typeof body.budgetMs === 'number' ? Math.min(Math.max(0, body.budgetMs), 25_000) : undefined;
+      return ok(await stepAssistedRun(deps, session.userId, uid(b), { budgetMs: budget, resume: body.resume === true }, async (rid) => void (await generateAssistedExport(deps, rid, session.userId))));
+    }
+    if (parts.length === 3 && c === 'export' && is('POST', '/assisted-runs/:id/export')) {
+      requirePermission(session, 'adjustments.view');
+      const path = await generateAssistedExport(deps, uid(b), session.userId);
+      return ok({ url: await ctx.storage.signedUrl(path, SIGNED_URL_TTL_SECONDS), expiresInSeconds: SIGNED_URL_TTL_SECONDS });
+    }
   }
   if (a !== 'adjustments') return null;
   if (parts.length === 1 && is('GET', '/adjustments')) {

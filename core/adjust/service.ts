@@ -205,7 +205,7 @@ export async function listProposals(q: Queryable, filter: { runFrom?: string; ru
   return r.rows.map((x) => toDto(x, s.autoEnabled));
 }
 
-async function addEvent(q: Queryable, proposalId: string, actor: string | null, event: string, from: string | null, to: string | null, simulated: boolean, detail: Record<string, unknown> = {}): Promise<void> {
+export async function addEvent(q: Queryable, proposalId: string, actor: string | null, event: string, from: string | null, to: string | null, simulated: boolean, detail: Record<string, unknown> = {}): Promise<void> {
   await q.query(
     `insert into adjustment_events (proposal_id, actor, event, from_status, to_status, simulated, detail) values ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
     [proposalId, actor, event, from, to, simulated, JSON.stringify(detail)],

@@ -214,6 +214,17 @@ Probar en demo: `npm run demo`, entrar como operador, importar enero de 2026 y a
 - **Reversa**: «Revertir» crea una propuesta con los valores anteriores guardados, sujeta a aprobación.
 - Activación paso a paso, verificaciones y reversa: `docs/silogtran-cambio-tarifa.md`. Migración `0010_real_writer.sql`. La función principal pasó a `maxDuration` 60 s (la escritura puede tardar).
 
+## Modo asistido de ajustes
+
+Tras una conciliación completada, **un solo flujo con confirmación humana** aprueba, ensaya y aplica las propuestas elegibles y entrega un reporte.
+- **Plan (sin efectos)**: `POST /api/reconciliations/:id/assisted/plan` genera las propuestas que falten y devuelve las **elegibles** (propuestas `proposed`/`approved` sin revisión y elegibles) con valores actuales→propuestos y las **excluidas** con motivo legible: pendiente de Terpel (volumen 0), ambiguos, sin coincidencia, ya ajustado, requiere revisión (`CURRENT_VALUES_UNAVAILABLE`, tarifa no exacta...), fuera de la lista de remesas permitidas, ya aplicadas. Incluye el estado del escritor para advertir «ESCRITURA REAL».
+- **Corrida**: `POST /api/assisted-runs {reconRunId, proposalIds, confirm:true}` (con `confirm` obligatorio y exactamente esos ids, que deben seguir siendo elegibles) y `POST /api/assisted-runs/:id/step` (~20 s por paso; la UI repite hasta terminar). `GET /api/assisted-runs/:id` da progreso y reporte; `POST /api/assisted-runs/:id/export` descarga el `.xlsx`.
+- **Por propuesta, en orden**: aprobar (como el actor; evento y auditoría `assisted`) → ensayo → si pasa todas las comprobaciones, aplicar con el escritor configurado. Respeta modo del escritor, lista de remesas permitidas (el modo asistido NO la amplía), `REHEARSAL_REQUIRED`, cuenta de ajustes y verificación en Home_111.
+- **Paradas**: ensayo fallido o rechazo previo a grabar → se **omite** (nada se escribió) y sigue. `uncertain`, `verification_failed`, `failed` tras grabar, o error de infraestructura/inesperado → la corrida se **DETIENE** (`halted`) y el resto queda pendiente sin tocar; se reanuda de forma explícita (`resume`), omitiendo lo detenido. Una sola corrida activa; lease de 90 s; si el navegador se cierra, la corrida queda reanudable y lo ya aplicado no se repite (`applyProposal` es idempotente).
+- **Permisos**: `adjustments.approve` y `adjustments.apply` (admin y facturación). Auditoría: `assisted.plan/start/approve/halt/resume/finish/export`.
+- **Reporte** (pantalla y `.xlsx`: Resumen, Aplicadas con antes→después y reversa, Omitidas y detenidas, Excluidas del plan por categoría) con la línea «Facturación: pendiente (fase 4, no implementada)».
+- Tablas `assisted_runs` y `assisted_run_items` (migración `0011_assisted_runs.sql`). El interruptor anterior «aplicación automática» queda como reservado (no implementado).
+
 ## Variables de entorno
 
 Ver [`.env.example`](.env.example) (sin valores reales). Las principales: `AUTH_MODE`, `MAIL_SOURCE`, `MAIL_MAILBOX`, `MAIL_ALLOWED_SENDER`, `MAIL_SUBJECT_PATTERN`, `MAIL_REQUIRE_DMARC_PASS`, `BUSINESS_KEY_STRATEGY`, `GRAPH_*`, `DATABASE_URL`, `STORAGE_DRIVER`, `SUPABASE_*`, `SILOG_*` (Fase 2), `ENCRYPTION_KEY` y `APP_SESSION_SECRET` (usuarios), `SILOG_WRITER` (`mock` por defecto; solo valor inicial: el modo efectivo está en la BD). Las variables `MAIL_*` solo siembran la primera configuración; luego un administrador la edita desde la UI.

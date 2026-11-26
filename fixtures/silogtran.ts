@@ -42,7 +42,7 @@ export function buildDemoSilogRows(): Record<string, unknown>[] {
   return [
     ...repeated(silogRow({ manifiesto: 'MD001', remesa_codigo: 9001, fecha: '2026-01-12', conductor_documento: '000001' }), 2), // 000123 exacto
     silogRow({ manifiesto: 'MD002', remesa_codigo: 9002, fecha: '2026-01-13', conductor_documento: '2', placa: 'XYZ987', remesa_peso: 9900, total_remesa: '2400000' }), // 000124 con diferencias
-    silogRow({ manifiesto: 'MD003', remesa_codigo: 9003, fecha: '2026-01-07', conductor_documento: '4', placa: 'ABC123' }), // 000125 ambiguo
+    silogRow({ manifiesto: 'MD003', remesa_codigo: 9003, fecha: '2026-01-08', conductor_documento: '4', placa: 'ABC123' }), // 000125 ambiguo
     silogRow({ manifiesto: 'MD004', remesa_codigo: 9004, fecha: '2026-01-08', conductor_documento: '4', placa: 'ABC123' }),
     silogRow({ manifiesto: 'MD005', remesa_codigo: 9005, fecha: '2026-01-12', cliente_nit: '900000001', conductor_documento: '7' }), // otro cliente
     silogRow({ manifiesto: 'MD006', remesa_codigo: 9006, fecha: '2026-01-12', conductor_documento: '7', estado: 'ANULADO' }),

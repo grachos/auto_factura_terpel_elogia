@@ -350,3 +350,60 @@ export interface ApplyPreviewDto {
   blocked: string | null;
   payload: { remesaCode: string; reason: string; pesoRemesa: string; cantidadRemesa: string; nuevaTarifa: string } | null;
 }
+
+// ---- Modo asistido -----------------------------------------------------------------------------------
+export type AssistedCategory = 'terpel_pending' | 'ambiguous' | 'no_match' | 'insufficient' | 'already_adjusted' | 'needs_review' | 'not_allowed' | 'applied' | 'attention' | 'not_eligible';
+
+export interface AssistedExcludedDto { category: AssistedCategory; transportNumber: string; remesaCode: string | null; reason: string; proposalId: string | null }
+
+export interface AssistedPlanItemDto {
+  proposalId: string;
+  transportNumber: string;
+  remesaCode: string | null;
+  status: ProposalStatus;
+  current: { peso: string | null; cantidad: string | null; tarifa: string | null; total: string | null };
+  proposed: { peso: string | null; cantidad: string | null; tarifa: string | null; total: string | null };
+}
+
+export interface AssistedPlanDto {
+  reconRunId: string;
+  writer: WriterStatusDto;
+  eligible: AssistedPlanItemDto[];
+  excluded: AssistedExcludedDto[];
+  generated: { created: number; refreshed: number; unchanged: number; needsReview: number; staled: number; total: number } | null;
+}
+
+export type AssistedItemResult = 'pending' | 'applied' | 'skipped' | 'halted' | 'failed';
+
+export interface AssistedItemDto {
+  position: number;
+  proposalId: string;
+  transportNumber: string | null;
+  remesaCode: string | null;
+  result: AssistedItemResult;
+  reason: string | null;
+  before: ScreenValuesDto | null;
+  after: ScreenValuesDto | null;
+  reversal: ScreenValuesDto | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface AssistedRunDto {
+  id: string;
+  reconRunId: string;
+  status: 'running' | 'completed' | 'halted';
+  writerMode: string;
+  simulated: boolean;
+  total: number;
+  applied: number;
+  skipped: number;
+  pending: number;
+  haltedReason: string | null;
+  excluded: AssistedExcludedDto[];
+  exportReady: boolean;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
+export interface AssistedRunDetailDto { run: AssistedRunDto; items: AssistedItemDto[]; done: boolean }

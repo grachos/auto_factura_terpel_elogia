@@ -1,5 +1,5 @@
 import type {
-  AdjustSettingsDto, ApplyPreviewDto, ProposalDto, ProposalEventDto, RehearsalDto, WriterStatusDto,
+  AdjustSettingsDto, ApplyPreviewDto, AssistedPlanDto, AssistedRunDetailDto, AssistedRunDto, ProposalDto, ProposalEventDto, RehearsalDto, WriterStatusDto,
   ApiErrorDto, MailConfigDto, MatchFilterDto, MeDto, PlaceAliasDto, PublicConfigDto, ReconParamsDto, ReconResultDto, ReconRunDetailDto,
   ReconRunDto, ReconSettingsDto, ReconStepDto, RunDetailDto, RunDto, StepResultDto,
 } from '../../core/types';
@@ -92,6 +92,12 @@ export const api = {
   revertProposal: (id: string) => request<ProposalDto>('POST', `/api/adjustments/${id}/revert`),
   discardSimulated: () => request<{ discarded: number }>('POST', '/api/adjustments/discard-simulated'),
   exportAdjustments: (runId: string) => request<{ url: string; rows: number }>('POST', '/api/adjustments/export', { runId }),
+  assistedPlan: (reconRunId: string) => request<AssistedPlanDto>('POST', `/api/reconciliations/${reconRunId}/assisted/plan`),
+  assistedCreate: (reconRunId: string, proposalIds: string[]) => request<AssistedRunDetailDto>('POST', '/api/assisted-runs', { reconRunId, proposalIds, confirm: true }),
+  assistedStep: (id: string, resume = false) => request<AssistedRunDetailDto>('POST', `/api/assisted-runs/${id}/step`, resume ? { resume: true } : {}),
+  assistedGet: (id: string) => request<AssistedRunDetailDto>('GET', `/api/assisted-runs/${id}`),
+  assistedList: (reconRunId: string) => request<{ runs: AssistedRunDto[] }>('GET', `/api/assisted-runs?reconRunId=${reconRunId}`),
+  assistedExport: (id: string) => request<{ url: string }>('POST', `/api/assisted-runs/${id}/export`),
   // Fase 2
   listRecon: () => request<{ runs: ReconRunDto[] }>('GET', '/api/reconciliations'),
   createRecon: (dateFrom: string, dateTo: string, sync = true) => request<ReconRunDto>('POST', '/api/reconciliations', { dateFrom, dateTo, sync }),
