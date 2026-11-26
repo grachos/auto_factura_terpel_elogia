@@ -227,7 +227,7 @@ const EXCLUDED_TEXT: Record<string, string> = {
   not_terpel: 'El cliente del registro no es Terpel', not_allowed: 'Fuera de la lista de remesas permitidas para emisión real', attention: 'Hay una factura en curso o con resultado incierto',
 };
 
-export async function computeInvoicePlan(deps: InvoiceDeps, reconRunId: string): Promise<Omit<InvoicePlanDto, 'eligible'> & { candidates: (CandRow & { observation: string; product: string; warning: string | null })[] }> {
+export async function computeInvoicePlan(deps: InvoiceDeps, reconRunId: string, view = false): Promise<Omit<InvoicePlanDto, 'eligible'> & { candidates: (CandRow & { observation: string; product: string; warning: string | null })[] }> {
   const run = await deps.db.query<{ from: string; to: string; status: string }>(
     `select to_char(date_from,'YYYY-MM-DD') as "from", to_char(date_to,'YYYY-MM-DD') as "to", status from reconciliation_runs where id = $1`, [reconRunId],
   );
@@ -239,7 +239,7 @@ export async function computeInvoicePlan(deps: InvoiceDeps, reconRunId: string):
   const rows = await deps.db.query<CandRow>(
     `select r.service_id, r.id as rid, r.status as rstatus, r.reason_code, to_char(r.service_date,'YYYY-MM-DD') as sd, r.authorization_id, r.chosen_record_id, a.transport_number,
             a.net_value::text as net_value, a.transport_volume::text as vol, a.service_entry_sheet as entry_sheet, a.route, s.remesa_code, s.plate, s.origin_city as origin, s.destination_city as destination, s.status as sstatus, s.invoice, s.client_nit,
-            (select p.status from adjustment_proposals p where p.service_id = r.service_id and p.kind = 'adjust' and p.status not in ('stale','discarded') order by p.created_at desc limit 1) as adj_status
+            (select p.status from adjustment_proposals p where p.service_id = r.service_id and p.kind = 'adjust' and p.status not in ('stale','discarded','misapplied') order by p.created_at desc limit 1) as adj_status
        from reconciliation_results r join authorizations a on a.id = r.authorization_id left join silogtran_records s on s.id = r.chosen_record_id
       where r.service_date between $1 and $2 order by r.service_date, a.transport_number`, [rr.from, rr.to],
   );
@@ -252,7 +252,7 @@ export async function computeInvoicePlan(deps: InvoiceDeps, reconRunId: string):
   );
   // Producto desde la CONSULTA de la remesa (Home_111), con la cuenta web (lectura).
   const wantHome = [...new Set(rows.rows.filter((r) => r.remesa_code && r.chosen_record_id && ['EXACT', 'MATCH_WITH_DIFFERENCES'].includes(r.rstatus)).map((r) => r.remesa_code as string))];
-  const homes = deps.homeReader ? await deps.homeReader.readMany(wantHome, null, 40_000) : new Map<string, RemesaState | { error: string }>();
+  const homes = deps.homeReader && !view ? await deps.homeReader.readMany(wantHome, null, 40_000) : new Map<string, RemesaState | { error: string }>();
   const ex = (category: string, r: CandRow, extra?: string): void => {
     excluded.push({ category, transportNumber: r.transport_number, remesaCode: r.remesa_code, reason: `${EXCLUDED_TEXT[category] ?? category}${extra ? `: ${extra}` : ''}` });
   };
@@ -271,7 +271,7 @@ export async function computeInvoicePlan(deps: InvoiceDeps, reconRunId: string):
     const home = homes.get(r.remesa_code);
     const product = cleanProduct(home && !('error' in home) ? home.producto : null);
     const missing = [
-      !product ? (home && 'error' in home ? `producto (no se pudo leer la consulta: ${home.error})` : 'producto') : null, !(r.origin ?? '').trim() ? 'origen' : null, !(r.destination ?? '').trim() ? 'destino' : null,
+      !product && !view ? (home && 'error' in home ? `producto (no se pudo leer la consulta: ${home.error})` : 'producto') : null, !(r.origin ?? '').trim() ? 'origen' : null, !(r.destination ?? '').trim() ? 'destino' : null,
       !r.transport_number ? 'número de transporte' : null, !r.entry_sheet ? 'hoja de entrada de servicio' : null, !/^\d+(\.\d+)?$/.test(nv) || Number(nv) <= 0 ? 'valor neto' : null,
     ].filter(Boolean);
     if (missing.length > 0) { ex('incomplete', r, `falta ${missing.join(', ')}`); continue; }
@@ -324,6 +324,21 @@ export async function buildInvoicePlan(deps: InvoiceDeps, reconRunId: string, ac
   }
   await audit(deps.db, actor, 'invoice.plan', 'reconciliation_run', reconRunId, { eligible: eligible.length, excluded: plan.excluded.length, writer: plan.writer.mode });
   return { reconRunId, writer: plan.writer, eligible, excluded: plan.excluded };
+}
+
+/** Vista SIN efectos (GET): facturas ya existentes del rango de la conciliación (cualquier estado) + excluidas con motivo + cuántas elegibles faltan por planificar. No lee Home_111. */
+export async function viewInvoicePlan(deps: InvoiceDeps, reconRunId: string): Promise<InvoicePlanDto> {
+  const plan = await computeInvoicePlan(deps, reconRunId, true);
+  const run = await deps.db.query<{ from: string; to: string }>(`select to_char(date_from,'YYYY-MM-DD') as "from", to_char(date_to,'YYYY-MM-DD') as "to" from reconciliation_runs where id = $1`, [reconRunId]);
+  const rr = run.rows[0];
+  await sweepInvoiceLeases(deps.db);
+  const rows = await deps.db.query<InvoiceRow>(`select ${COLS} from invoices where service_date between $1 and $2 and status <> 'discarded' order by service_date, transport_number`, [rr?.from, rr?.to]);
+  let unplanned = 0;
+  for (const c of plan.candidates) {
+    const ex = await deps.db.query('select 1 from invoices where idempotency_key = $1', [keyOf(c)]);
+    if (ex.rowCount === 0) unplanned += 1;
+  }
+  return { reconRunId, writer: plan.writer, eligible: rows.rows.map(toInvoiceDto), excluded: plan.excluded, unplanned };
 }
 
 // ---- Ensayo / emisión -------------------------------------------------------------------------------------------

@@ -60,3 +60,8 @@ En el ensayo se vuelve a leer Home_111: si no se puede leer el producto, o difie
 ## Qué debe confirmar el usuario antes de la primera factura real
 Vendedor (`CS`), retefuente (1 %), días de pago (15), ciudad de pago, tipo de factura, plantilla de observación,
 la cuenta de facturación en Usuarios, y activar la emisión real solo para UNA remesa en la lista permitida (ensayo → «Facturar esta» → verificar en Silogtran).
+
+## Conciliación uno a uno y coincidencia débil (recon-1.4.0)
+- Un registro de Silogtran no puede quedar elegido por dos servicios de Terpel. Tras conciliar, gana el servicio que mejor lo justifica: 1) elección manual, 2) coincidencia de placa, 3) total idéntico al valor de Terpel, 4) fecha más cercana. Un empate real deja a todos los empatados `AMBIGUOUS`; los demás pasan a `NO_MATCH` (`RECORD_TAKEN`: «el registro X ya corresponde a otro servicio de Terpel») sin ajuste ni factura.
+- Coincidencia débil: si solo coincide porque se ignoró el filtro preferente de placa (ningún candidato tenía su placa) y el total del registro NO es idéntico al valor de Terpel, queda `AMBIGUOUS` (`WEAK_PLATE_IGNORED`) para revisión manual; no es elegible para ajuste ni para facturar. Una elección manual la confirma.
+- Estado de ajuste `misapplied` («aplicada a remesa equivocada»): terminal, sin botón Revertir; se usa por corrección manual en la BD (evento `manual_correction`).

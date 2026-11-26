@@ -248,7 +248,7 @@ export interface ReconRunDetailDto {
 // ---- Fase 3: ajustes de tarifa ---------------------------------------------------------------------
 export type ProposalStatus =
   | 'proposed' | 'needs_review' | 'approved' | 'applying' | 'applied' | 'simulated_applied' | 'failed' | 'uncertain'
-  | 'verification_failed' | 'rejected' | 'stale' | 'discarded';
+  | 'verification_failed' | 'rejected' | 'stale' | 'discarded' | 'misapplied';
 
 export interface ProposalLineDto {
   field: 'pesoRemesa' | 'cantidadRemesa' | 'nuevaTarifa' | 'totalRemesa';
@@ -437,7 +437,7 @@ export interface InvoiceDto {
 
 export interface InvoiceExcludedDto { category: string; transportNumber: string; remesaCode: string | null; reason: string }
 
-export interface InvoicePlanDto { reconRunId: string; writer: InvoiceWriterStatusDto; eligible: InvoiceDto[]; excluded: InvoiceExcludedDto[] }
+export interface InvoicePlanDto { reconRunId: string; writer: InvoiceWriterStatusDto; eligible: InvoiceDto[]; excluded: InvoiceExcludedDto[]; /** Solo en la vista: elegibles que aún no tienen fila (falta generar el plan). */ unplanned?: number }
 
 export interface InvoiceRehearsalDto {
   invoiceId: string; simulated: boolean; writerKind: string; listing: InvoiceListingDto | null; amounts: InvoiceAmountsDto | null; observation: string; purchaseOrder: string;

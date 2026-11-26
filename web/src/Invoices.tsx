@@ -34,9 +34,17 @@ export function Invoices({ me }: { me: MeDto }) {
     api.listRecon().then((r) => { const done = r.runs.filter((x) => x.status === 'completed'); setRuns(done); if (done[0]) setReconId(done[0].id); }).catch((e) => setMsg({ kind: 'error', text: errMsg(e) }));
     loadSettings().catch((e) => setMsg({ kind: 'error', text: errMsg(e) }));
   }, []);
+  const actionable = (st: string): boolean => ['eligible', 'rehearsed', 'failed', 'skipped'].includes(st);
   useEffect(() => {
     setPlan(null); setRun(null); setConfirm(false); setRehearsal(null);
-    if (reconId) api.invoiceRunList(reconId).then((r) => setExisting(r.runs.find((x) => x.status !== 'completed') ?? null)).catch(() => undefined);
+    if (!reconId) return;
+    // Al abrir la pestaña o cambiar de conciliación se carga lo ya trabajado (lectura, sin efectos).
+    api.invoiceView(reconId).then((p) => { setPlan(p); setChecked(new Set(p.eligible.filter((e) => actionable(e.status)).map((e) => e.id))); }).catch((e) => setMsg({ kind: 'error', text: errMsg(e) }));
+    api.invoiceRunList(reconId).then(async (r) => {
+      setExisting(r.runs.find((x) => x.status !== 'completed') ?? null);
+      const last = r.runs[0];
+      if (last) setRun(await api.invoiceRunGet(last.id));
+    }).catch(() => undefined);
   }, [reconId]);
 
   const real = (plan?.writer.mode ?? settings?.writerMode) === 'web';
@@ -47,11 +55,12 @@ export function Invoices({ me }: { me: MeDto }) {
 
   const wrap = async (fn: () => Promise<void>) => { setBusy(true); setMsg(null); try { await fn(); } catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); } finally { setBusy(false); } };
   const loadPlan = () => wrap(async () => {
-    const p = await api.invoicePlan(reconId);
+    await api.invoicePlan(reconId);
+    const p = await api.invoiceView(reconId);
     setPlan(p); setRun(null); setConfirm(false); setRehearsal(null);
-    setChecked(new Set(p.eligible.filter((e) => ['eligible', 'rehearsed', 'failed', 'skipped'].includes(e.status)).map((e) => e.id)));
+    setChecked(new Set(p.eligible.filter((e) => actionable(e.status)).map((e) => e.id)));
   });
-  const refresh = async () => { if (reconId) { const p = await api.invoicePlan(reconId); setPlan(p); } };
+  const refresh = async () => { if (reconId) { const p = await api.invoiceView(reconId); setPlan(p); } };
 
   const drive = async (id: string, resume: boolean) => {
     setBusy(true); setMsg(null);
@@ -63,11 +72,11 @@ export function Invoices({ me }: { me: MeDto }) {
     } catch (e) {
       setMsg({ kind: 'warn', text: `${errMsg(e)} Puede reanudar la corrida: lo ya facturado no se repite.` });
       try { setRun(await api.invoiceRunGet(id)); } catch { /* sin conexión */ }
-    } finally { setBusy(false); }
+    } finally { setBusy(false); try { await refresh(); } catch { /* sin conexión */ } }
   };
   const startAll = () => wrap(async () => {
     const d = await api.invoiceRunCreate(reconId, picked.map((e) => e.id));
-    setRun(d); setPlan(null); setExisting(null);
+    setRun(d); setExisting(null);
     await drive(d.run.id, false);
   });
   const rehearseOne = (e: InvoiceDto) => wrap(async () => { setRehearsal(await api.invoiceRehearse(e.id)); await refresh(); });
@@ -107,7 +116,7 @@ export function Invoices({ me }: { me: MeDto }) {
       {plan && (
         <section className="card" aria-labelledby="inv-plan" data-testid="invoice-plan">
           <h2 id="inv-plan">Remesas por facturar</h2>
-          <p><b data-testid="invoice-count">{picked.length}</b> de {todo.length} marcadas · flete total esperado <b data-testid="invoice-total">{money(String(total))}</b> · {plan.excluded.length} excluida(s)</p>
+          <p><b data-testid="invoice-count">{picked.length}</b> de {todo.length} marcadas · flete total esperado <b data-testid="invoice-total">{money(String(total))}</b> · {plan.excluded.length} excluida(s){plan.unplanned ? ` · ${plan.unplanned} elegible(s) nueva(s) sin planificar: pulse «Generar plan de facturación»` : ''}</p>
           <div className="table-wrap">
             <table data-testid="invoice-table">
               <thead><tr><th></th><th>Transporte</th><th>Remesa</th><th>Placa</th><th>Fecha</th><th>Valor Terpel</th><th>Flete esperado</th><th>Estado</th><th></th></tr></thead>

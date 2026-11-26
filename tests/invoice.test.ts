@@ -206,6 +206,18 @@ describe('facturación 4a', () => {
     expect(row.product).toBe('B-100');
   });
 
+  it('vista GET sin efectos: carga lo ya trabajado (simuladas, omitidas) y las excluidas con motivo', async () => {
+    const before = (await ctx.db.query<{ n: number }>('select count(*)::int as n from invoice_events')).rows[0]?.n;
+    const r = await call('GET', `/api/reconciliations/${reconId}/invoices/view`, tok.fact);
+    expect(r.status).toBe(200);
+    const v = j<InvoicePlanDto>(r);
+    expect(v.eligible.map((e) => e.status)).toContain('simulated');
+    expect(v.excluded.length).toBeGreaterThan(0);
+    expect(v.unplanned).toBe(0);
+    expect((await ctx.db.query<{ n: number }>('select count(*)::int as n from invoice_events')).rows[0]?.n).toBe(before); // sin efectos
+    expect((await call('GET', `/api/reconciliations/${reconId}/invoices/view`, tok.op)).status).toBe(403);
+  });
+
   it('escritor real: lista permitida, ensayo obligatorio, lote desactivado por defecto, parada ante incierto y reanudación', async () => {
     await ctx.db.query(`insert into silog_credentials (purpose, silog_user, password_enc) values ('adjust','facturador','x')`);
     const fake = new FakeWebWriter(rows);

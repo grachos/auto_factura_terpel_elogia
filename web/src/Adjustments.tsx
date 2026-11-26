@@ -6,11 +6,11 @@ import { Assisted } from './Assisted';
 const STATUS_LABEL: Record<string, string> = {
   proposed: 'Propuesta', needs_review: 'Requiere revisión', approved: 'Aprobada', applying: 'Aplicando', applied: 'Aplicada',
   simulated_applied: 'SIMULADA', failed: 'Falló', uncertain: 'Resultado incierto', verification_failed: 'Verificación fallida',
-  rejected: 'Rechazada', stale: 'Obsoleta', discarded: 'Simulación descartada',
+  rejected: 'Rechazada', stale: 'Obsoleta', discarded: 'Simulación descartada', misapplied: 'Aplicada a remesa equivocada',
 };
 const REVIEW_LABEL: Record<string, string> = {
   TARIFF_NOT_EXACT: 'La tarifa no es un decimal exacto', TARIFF_TOO_LONG: 'La tarifa exacta no cabe en 12 caracteres', INVALID_INPUT: 'Galones o valor inválidos',
-  NOT_CUMPLIDO: 'El registro ya no está CUMPLIDO', ALREADY_INVOICED: 'El registro ya tiene factura',
+  MISAPPLIED: 'Aplicada a la remesa equivocada (no revertir)', NOT_CUMPLIDO: 'El registro ya no está CUMPLIDO', ALREADY_INVOICED: 'El registro ya tiene factura',
   CURRENT_VALUES_UNAVAILABLE: 'No se pudieron leer los valores reales de la remesa (no se asumen)', ALREADY_ADJUSTED: 'Ya ajustado: no hace falta proponer un cambio',
 };
 const EVENT_LABEL: Record<string, string> = {
@@ -18,7 +18,7 @@ const EVENT_LABEL: Record<string, string> = {
   apply_started: 'Aplicación iniciada', simulated_applied: 'Aplicada en modo SIMULADO (Silogtran no se modificó)', applied: 'Aplicada y verificada en Silogtran',
   verification_failed: 'Verificación posterior fallida', stale: 'Obsoleta: Silogtran cambió', conflict: 'Conflicto en Silogtran', uncertain: 'Resultado incierto',
   checked_not_applied: 'Consulta: el cambio no se aplicó', rehearsed: 'Ensayo realizado (sin grabar)', reversal_created: 'Se creó una propuesta de reversa', check_unknown: 'Consulta: estado desconocido', discarded: 'Simulación descartada',
-  precheck_failed: 'No se pudo releer Silogtran', writer_unavailable: 'Escritor no disponible', lease_expired: 'Aplicación sin respuesta',
+  manual_correction: 'Corrección manual (solo en la app)', precheck_failed: 'No se pudo releer Silogtran', writer_unavailable: 'Escritor no disponible', lease_expired: 'Aplicación sin respuesta',
 };
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : 'Error inesperado');
 const when = (v: string | null): string => (v ? new Date(v).toLocaleString('es-CO') : '—');

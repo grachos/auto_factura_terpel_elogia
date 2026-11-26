@@ -14,7 +14,7 @@ import { generateInvoiceExport } from '../invoice/excel.js';
 import { createInvoiceRun, getInvoiceRun, listInvoiceRuns, stepInvoiceRun } from '../invoice/runs.js';
 import {
   buildInvoicePlan, checkInvoice, getInvoice, getInvoiceEvents, getInvoiceSettings, invoiceWriterStatus, issueInvoice, listInvoices, rehearseInvoice,
-  resolveInvoice, saveInvoiceSettings, sweepInvoiceLeases,
+  resolveInvoice, saveInvoiceSettings, sweepInvoiceLeases, viewInvoicePlan,
 } from '../invoice/service.js';
 import type { InvoiceDeps } from '../invoice/service.js';
 import { generateAdjustExport } from '../adjust/excel.js';
@@ -339,6 +339,9 @@ async function dispatchInvoice(
     db: ctx.db, storage: ctx.storage, silog: ctx.silog, writer: settings.writerMode === 'web' ? ctx.invoiceWebWriter : ctx.invoiceWriter,
     allow: { all: settings.writerAllowAll, list: settings.writerAllowlist }, batchEnabled: settings.batchEnabled, homeReader: ctx.homeReader, verifyDelayMs: ctx.invoiceVerifyDelayMs,
   };
+  if (a === 'reconciliations' && parts.length === 4 && parts[3] === 'view' && is('GET', '/reconciliations/:id/invoices/view')) {
+    return ok(await viewInvoicePlan(deps, uid(b)));
+  }
   if (a === 'reconciliations' && parts.length === 4 && parts[3] === 'plan' && is('POST', '/reconciliations/:id/invoices/plan')) {
     return ok(await buildInvoicePlan(deps, uid(b), session.userId));
   }

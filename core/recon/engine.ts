@@ -1,6 +1,6 @@
 import { daysBetween, normalizeDocument, normalizePlace, parseTerpelRoute, sameNumber, toNumber } from './normalize.js';
 
-export const RULES_VERSION = 'recon-1.3.0';
+export const RULES_VERSION = 'recon-1.4.0';
 
 export type FilterKey = 'driver' | 'plate' | 'route' | 'date';
 export type FilterMode = 'exclusive' | 'preferred';
@@ -164,6 +164,30 @@ function closestByDate(cands: SilogCandidate[], serviceDate: string | null): Sil
 
 /** Cascada de filtros. `base` ya excluye ANULADO y clientes distintos de Terpel. */
 export function reconcile(t: TerpelInput, base: SilogCandidate[], p: EngineParams, manualId?: string | null): EngineResult {
+  return markWeak(t, base, reconcileTop(t, base, p, manualId), manualId);
+}
+
+/**
+ * Coincidencia DÉBIL (recon-1.4.0): el servicio solo coincidió porque se IGNORÓ el filtro preferente de placa (ningún candidato tenía su placa)
+ * y no hay otra señal fuerte (el total del registro no es idéntico al valor de Terpel). No se concilia sola: queda AMBIGUOUS con el único
+ * candidato para revisión manual (no es elegible para ajuste ni para facturar). Una elección manual la confirma.
+ */
+function markWeak(t: TerpelInput, base: SilogCandidate[], res: EngineResult, manualId?: string | null): EngineResult {
+  if ((res.status !== 'EXACT' && res.status !== 'MATCH_WITH_DIFFERENCES') || !res.chosenId || manualId === res.chosenId) return res;
+  const plateIgnored = res.trace.some((x) => x.filter === 'plate' && x.skipped && (x.reason === 'would_empty' || x.reason === 'fallback'));
+  if (!plateIgnored || !t.plateNormalized) return res;
+  const c = base.find((x) => x.id === res.chosenId);
+  const val = toNumber(t.netValue);
+  const tot = c ? toNumber(c.totalRemesa) : null;
+  if (val !== null && tot !== null && sameNumber(val, tot)) return res; // valor idéntico: señal fuerte
+  return {
+    ...res, status: 'AMBIGUOUS', chosenId: null, candidateIds: [res.chosenId],
+    reason: `Coincidencia débil: ningún candidato tiene la placa ${t.plateNormalized} y el valor no es idéntico; revise y elija el registro manualmente`,
+    reasonCode: 'WEAK_PLATE_IGNORED', weightSource: null,
+  };
+}
+
+function reconcileTop(t: TerpelInput, base: SilogCandidate[], p: EngineParams, manualId?: string | null): EngineResult {
   const first = reconcileCore(t, base, p, manualId, false);
   // Un filtro preferente (p. ej. placa) que sí encontró candidatos pero llevó a NO_MATCH no debe ocultar
   // el registro correcto: se reintenta sin los filtros preferentes.

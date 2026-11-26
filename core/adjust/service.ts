@@ -45,6 +45,7 @@ export const TRANSITIONS: Record<ProposalStatus, ProposalStatus[]> = {
   uncertain: ['applied', 'simulated_applied', 'verification_failed', 'failed'],
   verification_failed: [],
   applied: [],
+  misapplied: [],
   simulated_applied: ['discarded'],
   rejected: [],
   stale: ['proposed', 'needs_review', 'rejected'],

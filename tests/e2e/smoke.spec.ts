@@ -252,6 +252,7 @@ test('Facturación 4a: roles, plan con todas marcadas, confirmación, corrida si
   await page.getByTestId('invoice-plan-button').click();
   await expect(page.getByTestId('invoice-plan')).toBeVisible();
   const checks = page.getByTestId('invoice-check');
+  await expect(checks.first()).toBeVisible();
   const n = await checks.count();
   expect(n).toBeGreaterThan(0);
   for (let i = 0; i < n; i += 1) await expect(checks.nth(i)).toBeChecked(); // todas marcadas por defecto
@@ -262,6 +263,12 @@ test('Facturación 4a: roles, plan con todas marcadas, confirmación, corrida si
   await expect(page.getByTestId('invoice-item').first()).toContainText('Facturada');
   const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('invoice-download').click()]);
   expect(download.suggestedFilename()).toMatch(/^facturacion-.*\.xlsx$/);
+  // Al salir de la pestaña y volver, lo ya trabajado se carga solo (sin pulsar «Generar plan»).
+  await page.getByTestId('nav-recon').click();
+  await page.getByTestId('nav-invoices').click();
+  await expect(page.getByTestId('invoice-table')).toBeVisible();
+  await expect(page.getByTestId('invoice-row').first()).toContainText('SIMULADA');
+  await expect(page.getByTestId('invoice-run')).toBeVisible();
   await page.getByTestId('logout').click();
 
   await loginAs(page, 'viewer');

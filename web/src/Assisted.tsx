@@ -24,7 +24,10 @@ export function Assisted({ reconRunId, me, writer, onChanged }: { reconRunId: st
   useEffect(() => {
     setPlan(null); setRun(null); setConfirm(false);
     if (!reconRunId) return;
-    api.assistedList(reconRunId).then((r) => setExisting(r.runs.find((x) => x.status !== 'completed') ?? null)).catch(() => undefined);
+    api.assistedList(reconRunId).then(async (r) => {
+      setExisting(r.runs.find((x) => x.status !== 'completed') ?? null);
+      if (r.runs[0]) setRun(await api.assistedGet(r.runs[0].id)); // muestra la última corrida y su reporte
+    }).catch(() => undefined);
   }, [reconRunId]);
 
   if (!allowed) return null;

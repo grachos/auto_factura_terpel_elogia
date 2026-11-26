@@ -82,13 +82,21 @@ describe('motor de cascada', () => {
     expect(r.status).toBe('EXACT');
     expect(r.trace.map((t) => [t.filter, t.before, t.after])).toEqual([['driver', 2, 1], ['plate', 1, 1], ['route', 1, 1], ['date', 1, 1]]);
   });
-  it('diferencias ajustables de volumen y valor; placa solo informativa', () => {
+  it('diferencias ajustables de volumen y valor; placa solo informativa (con elección manual)', () => {
     const c = cand({ remesaWeight: '10000', totalRemesa: '4000000', plateNormalized: 'BBB222' });
-    const r = reconcile(terpel(), [c], params());
+    const r = reconcile(terpel(), [c], params(), c.id);
     expect(r.status).toBe('MATCH_WITH_DIFFERENCES');
     expect(r.differences.map((d) => [d.field, d.severity])).toEqual([['volume', 'adjustable'], ['value', 'adjustable'], ['plate', 'info']]);
     // placa preferente: se ignora (no excluye) y queda como diferencia informativa
     expect(r.trace[1]).toMatchObject({ filter: 'plate', skipped: true, reason: 'would_empty' });
+  });
+  it('recon-1.4.0: coincidencia débil (placa ignorada y valor distinto) => AMBIGUOUS para revisión, sin elegir', () => {
+    const c = cand({ remesaWeight: '10000', totalRemesa: '4000000', plateNormalized: 'BBB222' });
+    const r = reconcile(terpel(), [c], params());
+    expect(r.status).toBe('AMBIGUOUS');
+    expect(r.reasonCode).toBe('WEAK_PLATE_IGNORED');
+    expect(r.chosenId).toBeNull();
+    expect(r.candidateIds).toEqual([c.id]);
   });
   it('solo placa distinta => EXACT', () => {
     const r = reconcile(terpel(), [cand({ plateNormalized: 'ZZZ999' })], params());

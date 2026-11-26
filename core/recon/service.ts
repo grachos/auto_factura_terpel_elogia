@@ -8,6 +8,7 @@ import type {
   DifferenceDto, FilterKeyDto, FilterModeDto, MatchFilterDto, PlaceAliasDto, ReconParamsDto, ReconResultDto, ReconRunDetailDto,
   ReconRunDto, ReconSettingsDto, ReconStatus, ReconStepDto, SilogRecordDto, TraceStepDto,
 } from '../types.js';
+import { enforceOneToOne } from './assign.js';
 import { RULES_VERSION, reconcile } from './engine.js';
 import type { EngineParams, FilterConfig, SilogCandidate, TerpelInput } from './engine.js';
 import { addDays, normalizePlace } from './normalize.js';
@@ -438,6 +439,7 @@ export async function stepReconRun(deps: ReconDeps, runId: string, actor: string
       await reconcileRows(tx, runId, batch.rows, useParams, candidates);
       await tx.query(`update reconciliation_runs set reconcile_offset=$2, total_services=$3, status='reconciling', lease_until=null, error_code=null where id=$1`, [runId, newOffset, total]);
       if (finished) {
+        await enforceOneToOne(tx);
         await tx.query(
           `update reconciliation_runs set status='completed', finished_at=now(),
              exact=(select count(*) from reconciliation_results r where r.service_date between $2 and $3 and r.status='EXACT'),
@@ -555,7 +557,10 @@ async function reconcileOne(db: Db, resultId: string): Promise<void> {
   const settings = await loadSettings(db);
   const params = await engineParams(db);
   const cands = await loadCandidates(db, settings.terpelNit, addDays(row.service_date, -settings.lookbackDays), row.service_date);
-  await db.transaction((tx) => reconcileRows(tx, c.run_id, [row], params, cands));
+  await db.transaction(async (tx) => {
+    await reconcileRows(tx, c.run_id, [row], params, cands);
+    await enforceOneToOne(tx);
+  });
 }
 
 export async function resolveResult(db: Db, actor: string, resultId: string, recordId: unknown): Promise<ReconResultDto> {

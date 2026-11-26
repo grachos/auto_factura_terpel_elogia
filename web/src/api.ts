@@ -101,6 +101,7 @@ export const api = {
   assistedExport: (id: string) => request<{ url: string }>('POST', `/api/assisted-runs/${id}/export`),
   // Fase 4a: facturación
   invoicePlan: (reconRunId: string) => request<InvoicePlanDto>('POST', `/api/reconciliations/${reconRunId}/invoices/plan`),
+  invoiceView: (reconRunId: string) => request<InvoicePlanDto>('GET', `/api/reconciliations/${reconRunId}/invoices/view`),
   invoiceSettings: () => request<InvoiceSettingsDto>('GET', '/api/invoices/settings'),
   saveInvoiceSettings: (s: Partial<InvoiceSettingsDto> & { confirmAll?: boolean }) => request<InvoiceSettingsDto>('PUT', '/api/invoices/settings', s),
   invoiceRehearse: (id: string) => request<InvoiceRehearsalDto>('POST', `/api/invoices/${id}/rehearse`),
