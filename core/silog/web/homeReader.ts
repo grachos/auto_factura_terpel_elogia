@@ -58,7 +58,7 @@ export class SnapshotHomeReader implements HomeReader {
       const w = normalizeNumberString(x?.w ?? null);
       const rate = normalizeNumberString(x?.rate ?? null);
       const total = normalizeNumberString(x?.total ?? null);
-      out.set(c, w && rate && total ? { peso: w, pesoBruto: w, cantidadSolicitada: w, volumen: null, tarifa: rate, flete: total } : { error: 'SNAPSHOT_MISSING' });
+      out.set(c, w && rate && total ? { peso: w, pesoBruto: w, cantidadSolicitada: w, volumen: null, producto: 'B-100', tarifa: rate, flete: total } : { error: 'SNAPSHOT_MISSING' });
     }
     return out;
   }

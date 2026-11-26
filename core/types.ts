@@ -407,3 +407,53 @@ export interface AssistedRunDto {
 }
 
 export interface AssistedRunDetailDto { run: AssistedRunDto; items: AssistedItemDto[]; done: boolean }
+
+// ---- Fase 4a: facturación -------------------------------------------------------------------------------
+export type InvoiceStatus = 'eligible' | 'rehearsed' | 'issuing' | 'issued' | 'failed' | 'uncertain' | 'verification_failed' | 'skipped' | 'simulated' | 'discarded';
+
+export interface InvoiceSettingsDto {
+  costCenter: string; client: string; printableName: string; seller: string; paymentDays: number; paymentCity: string; currency: string; paymentMethod: string;
+  invoiceType: string; divide: 'SI' | 'NO'; maxRemesas: number; withholdingPercent: number; product: string; observationTemplate: string;
+  writerMode: 'mock' | 'web'; writerAllowlist: string[]; writerAllowAll: boolean; batchEnabled: boolean;
+}
+
+export interface InvoiceWriterStatusDto { mode: 'mock' | 'web'; simulated: boolean; allowAll: boolean; allowlist: string[]; batchEnabled: boolean }
+
+export interface InvoiceAmountsDto { freight: string; withholding: string; total: string }
+
+export interface InvoiceListingDto {
+  remesa: string; plate: string | null; date: string | null; delivered: string | null; pesoNeto: string | null; unidades: string | null; tarifaCliente: string | null;
+  tarifa: string | null; total: string | null; otros: string | null; origin: string | null; destination: string | null; product: string | null; description: string | null;
+  /** Observación que la pantalla traía antes de escribir la nuestra (si trae alguna). */
+  preloadedObservation?: string | null;
+}
+
+export interface InvoiceDto {
+  id: string; remesaCode: string; transportNumber: string; plate: string | null; serviceDate: string; terpelValue: string; expectedFreight: string;
+  status: InvoiceStatus; reviewCode: string | null; reviewDetail: string | null; valuesBefore: Record<string, unknown> | null; valuesAfter: Record<string, unknown> | null;
+  invoiceNumber: string | null; accountUser: string | null; writerKind: string | null; simulated: boolean; observation: string | null; issuedBy: string | null;
+  issuedAt: string | null; lastError: string | null; updatedAt: string;
+}
+
+export interface InvoiceExcludedDto { category: string; transportNumber: string; remesaCode: string | null; reason: string }
+
+export interface InvoicePlanDto { reconRunId: string; writer: InvoiceWriterStatusDto; eligible: InvoiceDto[]; excluded: InvoiceExcludedDto[] }
+
+export interface InvoiceRehearsalDto {
+  invoiceId: string; simulated: boolean; writerKind: string; listing: InvoiceListingDto | null; amounts: InvoiceAmountsDto | null; observation: string; purchaseOrder: string;
+  checks: { name: string; ok: boolean; detail?: string }[]; allChecksOk: boolean; wouldIssue: false;
+}
+
+export type InvoiceItemResult = 'pending' | 'issued' | 'skipped' | 'halted' | 'failed';
+
+export interface InvoiceRunItemDto {
+  position: number; invoiceId: string; remesaCode: string | null; transportNumber: string | null; result: InvoiceItemResult; reason: string | null;
+  invoiceNumber: string | null; amounts: InvoiceAmountsDto | null; startedAt: string | null; finishedAt: string | null;
+}
+
+export interface InvoiceRunDto {
+  id: string; reconRunId: string; status: 'running' | 'completed' | 'halted'; writerMode: string; simulated: boolean; total: number; issued: number; skipped: number;
+  pending: number; haltedReason: string | null; excluded: InvoiceExcludedDto[]; exportReady: boolean; createdAt: string; finishedAt: string | null;
+}
+
+export interface InvoiceRunDetailDto { run: InvoiceRunDto; items: InvoiceRunItemDto[]; done: boolean }

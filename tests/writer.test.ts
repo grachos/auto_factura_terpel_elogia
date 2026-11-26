@@ -150,7 +150,7 @@ describe('consulta de la remesa (Home_111): parseo por encabezados', () => {
     `<html><body>${tarifa}${flete}<table id="ctl0_MainModule_ItemsRemesa"><tr>${cols.map((c) => `<th>${c[0]}</th>`).join('')}</tr><tr>${cols.map((c) => `<td>${c[1]}</td>`).join('')}</tr></table></body></html>`;
   const real: [string, string][] = [['Borrar', 'Borrar'], ['Editar', 'Editar'], ['Cantidad', '10500'], ['Producto', 'B-100'], ['Empaque', 'GRANEL LIQUIDO'], ['Unidad Medida', ''], ['Peso', '10487'], ['Peso Bruto', '10487'], ['Volumen', '0'], ['Descripcion', 'B-100'], ['Remision', ''], ['Despacho', 'DESPACHO'], ['Valorizacion', '0'], ['Valor Declarado', '0']];
   it('lee Peso, Peso Bruto, Cantidad (solicitada), tarifa_cliente y remesa_flete (comas de miles)', () => {
-    expect(parseRemesaHome(page(real))).toEqual({ peso: '10487', pesoBruto: '10487', cantidadSolicitada: '10500', volumen: '0', tarifa: '235', flete: '2464445' });
+    expect(parseRemesaHome(page(real))).toEqual({ peso: '10487', pesoBruto: '10487', cantidadSolicitada: '10500', volumen: '0', producto: 'B-100', tarifa: '235', flete: '2464445' });
   });
   it('por NOMBRE de columna: otro orden de columnas da lo mismo', () => {
     const shuffled = [real[6], real[2], real[7], real[0], real[8]] as [string, string][];

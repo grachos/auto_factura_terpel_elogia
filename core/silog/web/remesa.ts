@@ -14,6 +14,8 @@ export interface RemesaState {
   /** Columna «Cantidad»: cantidad ORIGINAL de la solicitud; el cambio de tarifa no la modifica. */
   cantidadSolicitada: string;
   volumen: string | null;
+  /** Columna «Producto» de la tabla de ítems (texto, p. ej. «B-100»). */
+  producto: string | null;
   /** `ctl0_MainModule_tarifa_cliente`. */
   tarifa: string;
   /** `ctl0$MainModule$remesa_flete` (total de la remesa; Silogtran lo muestra con comas de miles). */
@@ -48,6 +50,7 @@ export function parseRemesaHome(html: string): RemesaState {
   const iBruto = idx('peso bruto');
   const iCant = idx('cantidad');
   const iVol = idx('volumen');
+  const iProd = idx('producto');
   if (iPeso < 0 || iBruto < 0 || iCant < 0) throw bad('La tabla de ítems no tiene las columnas Peso, Peso Bruto y Cantidad');
   const rows = $(table).find('tr').toArray().map((r) => $(r).find('td').toArray().map((c) => $(c).text().replace(/\s+/g, ' ').trim())).filter((r) => r.length === headers.length);
   if (rows.length !== 1) throw bad(`La remesa tiene ${rows.length} ítems; se esperaba exactamente 1`);
@@ -62,7 +65,7 @@ export function parseRemesaHome(html: string): RemesaState {
   const flete = homeNumber(fleteEl.length ? (fleteEl.is('input') ? fleteEl.attr('value') : fleteEl.text()) : $('[name="ctl0$MainModule$remesa_flete"]').attr('value'));
   if (!tarifa) throw bad('No se pudo leer la tarifa del cliente (tarifa_cliente)');
   if (!flete) throw bad('No se pudo leer el flete de la remesa (remesa_flete)');
-  return { peso, pesoBruto: bruto, cantidadSolicitada: cant, volumen: iVol >= 0 ? homeNumber(row[iVol]) : null, tarifa, flete };
+  return { peso, pesoBruto: bruto, cantidadSolicitada: cant, volumen: iVol >= 0 ? homeNumber(row[iVol]) : null, producto: iProd >= 0 ? ((row[iProd] ?? '').trim() || null) : null, tarifa, flete };
 }
 
 /** `inQueue`: el llamador ya está dentro de client.enqueue() (no se encola de nuevo para no bloquearse a sí mismo). */

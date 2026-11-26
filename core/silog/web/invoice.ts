@@ -1,7 +1,7 @@
 // Pantalla de facturar de Silogtran: Financiero.Factura.Automatica_111 (PRADO). Mapa en docs/silogtran-facturacion.md.
 // Este módulo SOLO lee y llena el formulario en memoria; el envío de «Facturar Remesas» vive aparte y está protegido.
 import * as cheerio from 'cheerio';
-import { PradoPage } from './prado.js';
+import type { PradoPage } from './prado.js';
 
 export const P = 'ctl0$MainModule$';
 
@@ -70,6 +70,38 @@ export async function fillInvoiceForm(prado: PradoPage, p: InvoiceParams, steps:
   const city = prado.fields[`${P}ciudad_codigo_pago`] ?? '';
   if (norm(city) !== norm(p.paymentCity)) ok = (await pickSuggestion(prado, `${P}ciudad_codigo_pago`, p.paymentCity, p.paymentCity, steps, 'Ciudad de pago', false)) && ok;
   else steps.push({ step: 'Ciudad de pago: ya viene por defecto', ok: true });
-  ok = (await pickSuggestion(prado, `${P}impuesto_codigo`, p.withholding, p.withholding, steps, 'Retefuente', false)) && ok;
+  // La retefuente viene del cliente (campos ocultos impuesto_retefuente_*): se verifica en el ensayo, no se elige a mano.
   return ok;
+}
+
+export interface ListingRowRaw {
+  ctl: string; remesa: string; vehiculo: string | null; fecha: string | null; cumplida: string | null; tipo: string | null; origen: string | null; destino: string | null;
+  producto: string | null; peso: string | null; unidades: string | null; descripcion: string | null; tarifaCliente: string | null; tarifa: string | null; otros: string | null;
+  total: string | null; checkbox: string | null;
+}
+
+const ROW_FIELD = /^ctl0\$MainModule\$porFacturar\$(ctl\d+)\$(\w+)$/;
+
+/** Filas del listado «porFacturar» (incluye inputs deshabilitados: peso y tarifa_cliente). */
+export function parseInvoiceListing(html: string): ListingRowRaw[] {
+  const $ = cheerio.load(html);
+  const rows = new Map<string, Record<string, string>>();
+  $('input, textarea').each((_, el) => {
+    const $el = $(el);
+    const m = ROW_FIELD.exec($el.attr('name') ?? '');
+    if (!m) return;
+    const r = rows.get(m[1] as string) ?? {};
+    r[m[2] as string] = (el as { tagName: string }).tagName === 'textarea' ? $el.text().trim() : ($el.attr('value') ?? '').trim();
+    rows.set(m[1] as string, r);
+  });
+  return [...rows.entries()].map(([ctl, r]) => ({
+    ctl, remesa: r.remesa1 ?? '', vehiculo: r.vehiculo ?? null, fecha: r.fecha ?? null, cumplida: r.estado_remesa ?? null, tipo: r.tiporemesa ?? null, origen: r.origen ?? null,
+    destino: r.destino ?? null, producto: r.observacion ?? null, peso: r.peso ?? null, unidades: r.unidades ?? null, descripcion: r.descripcion_remesa ?? null,
+    tarifaCliente: r.tarifa_cliente ?? null, tarifa: r.tarifa ?? null, otros: r.otros ?? null, total: r.total ?? null, checkbox: Object.keys(r).includes('valido') ? `${P}porFacturar$${ctl}$valido` : null,
+  }));
+}
+
+/** Retefuente que el cliente trae configurada (campos ocultos tras elegir el cliente). */
+export function readWithholding(prado: PradoPage): { name: string; percent: string } {
+  return { name: prado.fields[`${P}impuesto_retefuente_nombre`] ?? '', percent: prado.fields[`${P}impuesto_retefuente_porcentaje`] ?? '' };
 }

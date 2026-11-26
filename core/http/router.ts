@@ -10,6 +10,13 @@ import { runDiagnostic, runInvoiceDiagnostic } from '../silog/web/diagnostic.js'
 import { SilogWebError } from '../silog/web/errors.js';
 import { openWebSession } from '../silog/web/session.js';
 import type { WebPurpose } from '../silog/web/session.js';
+import { generateInvoiceExport } from '../invoice/excel.js';
+import { createInvoiceRun, getInvoiceRun, listInvoiceRuns, stepInvoiceRun } from '../invoice/runs.js';
+import {
+  buildInvoicePlan, checkInvoice, getInvoice, getInvoiceEvents, getInvoiceSettings, invoiceWriterStatus, issueInvoice, listInvoices, rehearseInvoice,
+  resolveInvoice, saveInvoiceSettings, sweepInvoiceLeases,
+} from '../invoice/service.js';
+import type { InvoiceDeps } from '../invoice/service.js';
 import { generateAdjustExport } from '../adjust/excel.js';
 import {
   applyBatch, applyProposal, approveProposal, checkUncertain, discardSimulated, generateProposals, getAdjustSettings, getEvents, getProposal,
@@ -208,7 +215,7 @@ async function dispatch(ctx: AppContext, req: HttpRequest, setRoute: (r: string)
       file: {
         data,
         contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        filename: p.startsWith('assisted/') ? `asistido-${p.split('/')[1]?.slice(0, 8) ?? 'corrida'}.xlsx` : p.startsWith('recon/') ? `conciliacion-${p.split('/')[1]?.slice(0, 8) ?? 'lote'}.xlsx` : `autorizaciones-${p.split('/')[0]?.slice(0, 8) ?? 'lote'}.xlsx`,
+        filename: p.startsWith('invoices/') ? `facturacion-${p.split('/')[1]?.slice(0, 8) ?? 'corrida'}.xlsx` : p.startsWith('assisted/') ? `asistido-${p.split('/')[1]?.slice(0, 8) ?? 'corrida'}.xlsx` : p.startsWith('recon/') ? `conciliacion-${p.split('/')[1]?.slice(0, 8) ?? 'lote'}.xlsx` : `autorizaciones-${p.split('/')[0]?.slice(0, 8) ?? 'lote'}.xlsx`,
       },
     };
   }
@@ -297,6 +304,9 @@ async function dispatch(ctx: AppContext, req: HttpRequest, setRoute: (r: string)
     return ok({ ok: true });
   }
 
+  const inv = await dispatchInvoice(ctx, session, parts, is, req);
+  if (inv) return inv;
+
   const adj = await dispatchAdjust(ctx, session, parts, is, req);
   if (adj) return adj;
 
@@ -307,6 +317,83 @@ async function dispatch(ctx: AppContext, req: HttpRequest, setRoute: (r: string)
   if (recon) return recon;
 
   throw new AppError(404, 'NOT_FOUND', 'Ruta no encontrada');
+}
+
+async function dispatchInvoice(
+  ctx: AppContext,
+  session: Session,
+  parts: string[],
+  is: (m: string, route: string) => boolean,
+  req: HttpRequest,
+): Promise<HttpResponse | null> {
+  const [a, b, c] = parts;
+  const isInvoiceRoute = a === 'invoices' || a === 'invoice-runs' || (a === 'reconciliations' && c === 'invoices');
+  if (!isInvoiceRoute) return null;
+  requirePermission(session, 'invoices.manage');
+  const uid = (seg: string | undefined): string => {
+    if (!isUuid(seg)) throw new AppError(400, 'INVALID_ID', 'Identificador inválido');
+    return seg;
+  };
+  const settings = await getInvoiceSettings(ctx.db);
+  const deps: InvoiceDeps = {
+    db: ctx.db, storage: ctx.storage, silog: ctx.silog, writer: settings.writerMode === 'web' ? ctx.invoiceWebWriter : ctx.invoiceWriter,
+    allow: { all: settings.writerAllowAll, list: settings.writerAllowlist }, batchEnabled: settings.batchEnabled, homeReader: ctx.homeReader, verifyDelayMs: ctx.invoiceVerifyDelayMs,
+  };
+  if (a === 'reconciliations' && parts.length === 4 && parts[3] === 'plan' && is('POST', '/reconciliations/:id/invoices/plan')) {
+    return ok(await buildInvoicePlan(deps, uid(b), session.userId));
+  }
+  if (a === 'invoice-runs') {
+    if (parts.length === 1 && is('GET', '/invoice-runs')) {
+      const rid = typeof req.query.reconRunId === 'string' && req.query.reconRunId !== '' ? uid(req.query.reconRunId) : undefined;
+      return ok({ runs: await listInvoiceRuns(ctx.db, rid) });
+    }
+    if (parts.length === 1 && is('POST', '/invoice-runs')) {
+      const body = asObject(req.body);
+      return ok(await createInvoiceRun(deps, session.userId, { reconRunId: body.reconRunId, invoiceIds: body.invoiceIds, confirm: body.confirm }), 201);
+    }
+    if (parts.length === 2 && is('GET', '/invoice-runs/:id')) return ok(await getInvoiceRun(ctx.db, uid(b)));
+    if (parts.length === 3 && c === 'step' && is('POST', '/invoice-runs/:id/step')) {
+      const body = asObject(req.body ?? {});
+      const budget = typeof body.budgetMs === 'number' ? Math.min(Math.max(0, body.budgetMs), 25_000) : undefined;
+      return ok(await stepInvoiceRun(deps, session.userId, uid(b), { budgetMs: budget, resume: body.resume === true }, async (rid) => void (await generateInvoiceExport(deps, rid, session.userId))));
+    }
+    if (parts.length === 3 && c === 'export' && is('POST', '/invoice-runs/:id/export')) {
+      const path = await generateInvoiceExport(deps, uid(b), session.userId);
+      return ok({ url: await ctx.storage.signedUrl(path, SIGNED_URL_TTL_SECONDS), expiresInSeconds: SIGNED_URL_TTL_SECONDS });
+    }
+    return null;
+  }
+  if (a !== 'invoices') return null;
+  if (parts.length === 1 && is('GET', '/invoices')) {
+    await sweepInvoiceLeases(ctx.db);
+    const status = typeof req.query.status === 'string' && req.query.status !== '' ? req.query.status : null;
+    return ok({ invoices: await listInvoices(ctx.db, { status }), writerKind: deps.writer.kind, simulated: deps.writer.simulated });
+  }
+  if (b === 'writer-status' && parts.length === 2 && is('GET', '/invoices/writer-status')) return ok(invoiceWriterStatus(settings));
+  if (b === 'settings' && parts.length === 2) {
+    if (is('GET', '/invoices/settings')) return ok(settings);
+    if (is('PUT', '/invoices/settings')) {
+      requirePermission(session, 'invoices.config');
+      return ok(await saveInvoiceSettings(ctx.db, session.userId, asObject(req.body)));
+    }
+  }
+  if (parts.length === 2 && is('GET', '/invoices/:id')) {
+    await sweepInvoiceLeases(ctx.db);
+    const id = uid(b);
+    return ok({ invoice: await getInvoice(ctx.db, id), events: await getInvoiceEvents(ctx.db, id) });
+  }
+  if (parts.length === 3) {
+    const id = uid(b);
+    if (c === 'rehearse' && is('POST', '/invoices/:id/rehearse')) return ok(await rehearseInvoice(deps, session.userId, id));
+    if (c === 'issue' && is('POST', '/invoices/:id/issue')) return ok(await issueInvoice(deps, session.userId, id, asObject(req.body ?? {}).confirm));
+    if (c === 'check' && is('POST', '/invoices/:id/check')) return ok(await checkInvoice(deps, session.userId, id));
+    if (c === 'resolve' && is('POST', '/invoices/:id/resolve')) {
+      requirePermission(session, 'invoices.config');
+      const body = asObject(req.body);
+      return ok(await resolveInvoice(ctx.db, session.userId, id, { outcome: body.outcome, invoiceNumber: body.invoiceNumber, note: body.note }));
+    }
+  }
+  return null;
 }
 
 async function dispatchAdjust(

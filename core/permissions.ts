@@ -16,7 +16,9 @@ export type Permission =
   | 'adjustments.generate'
   | 'adjustments.approve'
   | 'adjustments.apply'
-  | 'adjustments.config';
+  | 'adjustments.config'
+  | 'invoices.manage'
+  | 'invoices.config';
 
 const RUNNERS: AppRole[] = ['admin', 'facturacion', 'operator'];
 
@@ -35,6 +37,8 @@ export const PERMISSION_ROLES: Record<Permission, AppRole[]> = {
   'adjustments.approve': ['admin', 'facturacion'],
   'adjustments.apply': ['admin', 'facturacion'],
   'adjustments.config': ['admin'],
+  'invoices.manage': ['admin', 'facturacion'],
+  'invoices.config': ['admin'],
 };
 
 export function can(role: AppRole, permission: Permission): boolean {

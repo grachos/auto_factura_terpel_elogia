@@ -62,6 +62,8 @@ describe('matriz de permisos', () => {
     'adjustments.approve': ['admin', 'facturacion'],
     'adjustments.apply': ['admin', 'facturacion'],
     'adjustments.config': ['admin'],
+    'invoices.manage': ['admin', 'facturacion'],
+    'invoices.config': ['admin'],
   };
   it('coincide con la decisión del negocio', () => {
     for (const p of Object.keys(expected) as Permission[]) {

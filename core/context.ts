@@ -15,6 +15,9 @@ import { MockSilogAuth, SilogApiAuth } from './silogAuth.js';
 import type { SilogAuthClient } from './silogAuth.js';
 import { MockSilogtranWriter } from './adjust/writer.js';
 import { SilogtranWebWriter } from './silog/web/writer.js';
+import { MockInvoiceWriter } from './invoice/writer.js';
+import type { InvoiceWriter } from './invoice/writer.js';
+import { SilogtranWebInvoiceWriter } from './silog/web/invoiceWriter.js';
 import { SnapshotHomeReader, WebHomeReader } from './silog/web/homeReader.js';
 import type { HomeReader } from './adjust/service.js';
 import type { SilogtranWriter } from './adjust/writer.js';
@@ -40,6 +43,12 @@ export interface AppContext {
   writer: SilogtranWriter;
   /** Escritor REAL (se usa solo si el modo guardado en BD es `web`). */
   webWriter: SilogtranWriter;
+  /** Escritor de facturas simulado (nunca toca Silogtran). */
+  invoiceWriter: InvoiceWriter;
+  /** Escritor de facturas REAL (solo se usa si el modo guardado en BD es `web`). */
+  invoiceWebWriter: InvoiceWriter;
+  /** Solo pruebas: espera entre lecturas del informe al verificar una factura. */
+  invoiceVerifyDelayMs?: number;
   /** Lectura de los valores reales de las remesas (consulta Home_111; en demo, derivada del snapshot). */
   homeReader: HomeReader;
   /** Resolvedor del reto AWS WAF para el login web de Silogtran (HTTP a api/silog-waf, o Chromium local). */
@@ -189,6 +198,8 @@ export async function createContext(env: Record<string, string | undefined> = pr
       ? new WebHomeReader({ db, encryptionKey: config.security.encryptionKey, baseUrl: webBase, waf, fetchFn: () => out.webFetch })
       : new SnapshotHomeReader(db),
     webWriter: new SilogtranWebWriter({ db, encryptionKey: config.security.encryptionKey, baseUrl: webBase, waf, fetchFn: () => out.webFetch }),
+    invoiceWriter: new MockInvoiceWriter(),
+    invoiceWebWriter: new SilogtranWebInvoiceWriter({ db, encryptionKey: config.security.encryptionKey, baseUrl: webBase, waf, fetchFn: () => out.webFetch }),
   };
   return out;
 }
