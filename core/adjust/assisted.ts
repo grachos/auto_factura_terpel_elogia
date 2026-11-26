@@ -51,8 +51,8 @@ export async function computePlan(deps: AdjustDeps, reconRunId: string): Promise
   const ex = (category: AssistedCategory, p: ProposalDto, reason: string): void => {
     excluded.push({ category, transportNumber: p.transportNumber, remesaCode: p.remesaCode, reason, proposalId: p.id });
   };
-  // Una propuesta viva por servicio: ignora las obsoletas/descartadas cuando hay otra vigente.
-  const live = proposals.filter((p) => !['stale', 'discarded'].includes(p.status) || !proposals.some((q) => q.transportNumber === p.transportNumber && q.id !== p.id && !['stale', 'discarded'].includes(q.status)));
+  // Las obsoletas (p. ej. el servicio ya no tiene diferencias) y las descartadas no son parte del plan.
+  const live = proposals.filter((p) => !['stale', 'discarded'].includes(p.status));
   for (const p of live) {
     const line = (f: string): { current: string | null; proposed: string | null } => {
       const l = p.lines.find((x) => x.field === f);
