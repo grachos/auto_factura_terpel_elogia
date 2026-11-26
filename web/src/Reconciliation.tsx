@@ -249,7 +249,7 @@ export function Reconciliation({ cfg, me }: { cfg: PublicConfigDto; me: MeDto })
     } catch (e) { setNotice({ kind: 'error', text: errMsg(e) }); }
   };
 
-  const visible = results.filter((r) => (review ? REVIEW.includes(r.status) : true) && (statusFilter ? r.status === statusFilter : true));
+  const visible = results.filter((r) => (review ? REVIEW.includes(r.status) : true) && (statusFilter === 'EXACT_NOVELTY' ? r.status === 'EXACT' && r.differences.length > 0 : statusFilter === 'EXACT_CLEAN' ? r.status === 'EXACT' && r.differences.length === 0 : statusFilter ? r.status === statusFilter : true));
   const progress = run ? progressOf(run) : null;
 
   return (
@@ -296,7 +296,10 @@ export function Reconciliation({ cfg, me }: { cfg: PublicConfigDto; me: MeDto })
               <label>Estado
                 <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} data-testid="recon-status-filter">
                   <option value="">Todos</option>
-                  {['EXACT', 'MATCH_WITH_DIFFERENCES', 'AMBIGUOUS', 'NO_MATCH', 'INSUFFICIENT_DATA'].map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+                  <option value="EXACT">Exacto (todos)</option>
+                  <option value="EXACT_CLEAN">Exacto sin novedad</option>
+                  <option value="EXACT_NOVELTY">Exacto con novedad</option>
+                  {['MATCH_WITH_DIFFERENCES', 'AMBIGUOUS', 'NO_MATCH', 'INSUFFICIENT_DATA'].map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
                 </select>
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: '.4rem' }}>
