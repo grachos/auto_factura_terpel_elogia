@@ -100,12 +100,19 @@ describe('motor de cascada', () => {
     expect(r.status).toBe('EXACT');
     expect(compareRecord(terpel({ transportVolume: 0 }), cand({ remesaWeight: 5 }))).toEqual([]);
   });
-  it('AMBIGUOUS con dos viajes del mismo conductor y ruta (nunca elige)', () => {
-    const r = reconcile(terpel(), [cand(), cand({ dispatchDate: '2026-11-19' })], params());
+  it('varios candidatos con fechas distintas: elige el despacho más cercano a la fecha de Terpel', () => {
+    const r = reconcile(terpel(), [cand({ id: 'lejos' }), cand({ id: 'cerca', dispatchDate: '2026-11-19' }), cand({ id: 'mas-lejos', dispatchDate: '2026-11-13' })], params());
+    expect(r.status).toBe('EXACT');
+    expect(r.chosenId).toBe('cerca');
+    expect(r.reason).toContain('más cercano');
+    expect(r.trace.at(-1)).toMatchObject({ filter: 'date', before: 3, after: 1, reason: 'closest_date' });
+  });
+  it('AMBIGUOUS con dos viajes del mismo conductor y ruta en la misma fecha (nunca elige)', () => {
+    const r = reconcile(terpel(), [cand({ dispatchDate: '2026-11-19' }), cand({ dispatchDate: '2026-11-19' })], params());
     expect(r.status).toBe('AMBIGUOUS');
     expect(r.chosenId).toBeNull();
     expect(r.candidateIds).toHaveLength(2);
-    const manual = reconcile(terpel(), [cand({ id: 'x1' }), cand({ id: 'x2', dispatchDate: '2026-11-19' })], params(), 'x2');
+    const manual = reconcile(terpel(), [cand({ id: 'x1', dispatchDate: '2026-11-19' }), cand({ id: 'x2', dispatchDate: '2026-11-19' })], params(), 'x2');
     expect(manual.chosenId).toBe('x2');
     expect(manual.status).toBe('EXACT');
   });
@@ -363,7 +370,7 @@ describe('API de conciliación', () => {
     await seedService(db, { transport: 'T-ALI', date: '2026-11-20', driver: '0000000022', route: 'C1-BUCARAMANGA - CUCUTA', plate: 'BBB002', volume: 5000, value: 100 });
     const b = { cliente_nit: TERPEL_NIT, ciudad_origen_remesa: 'BUCARAMANGA', ciudad_destino_remesa: 'CUCUTA', remesa_peso: 5000, total_remesa: '100' };
     return [
-      silogRow({ ...b, manifiesto: 'N1', remesa_codigo: 1, fecha: '2026-11-18', conductor_documento: '21', placa: 'BBB001' }),
+      silogRow({ ...b, manifiesto: 'N1', remesa_codigo: 1, fecha: '2026-11-19', conductor_documento: '21', placa: 'BBB001' }),
       silogRow({ ...b, manifiesto: 'N2', remesa_codigo: 2, fecha: '2026-11-19', conductor_documento: '21', placa: 'BBB001' }),
       silogRow({ ...b, manifiesto: 'N3', remesa_codigo: 3, fecha: '2026-11-19', conductor_documento: '22', placa: 'BBB002', ciudad_destino_remesa: 'VILLA NUEVA DEL ROSARIO' }),
     ];

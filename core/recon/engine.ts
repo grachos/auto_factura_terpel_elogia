@@ -1,6 +1,6 @@
 import { daysBetween, normalizeDocument, normalizePlace, parseTerpelRoute, sameNumber, toNumber } from './normalize.js';
 
-export const RULES_VERSION = 'recon-1.0.0';
+export const RULES_VERSION = 'recon-1.1.0';
 
 export type FilterKey = 'driver' | 'plate' | 'route' | 'date';
 export type FilterMode = 'exclusive' | 'preferred';
@@ -41,7 +41,7 @@ export interface TraceStep {
   after: number;
   mode: FilterMode;
   skipped: boolean;
-  reason?: 'inactive' | 'would_empty' | 'no_terpel_data';
+  reason?: 'inactive' | 'would_empty' | 'no_terpel_data' | 'closest_date';
 }
 
 export interface Difference {
@@ -147,6 +147,18 @@ function classifySingle(t: TerpelInput, c: SilogCandidate, trace: TraceStep[], e
   };
 }
 
+/** Candidato con la fecha de despacho más cercana (≤ fecha de Terpel); null si no hay uno único. */
+function closestByDate(cands: SilogCandidate[], serviceDate: string | null): SilogCandidate | null {
+  if (!serviceDate) return null;
+  const dated = cands
+    .filter((c) => c.dispatchDate)
+    .map((c) => ({ c, d: Math.abs(daysBetween(c.dispatchDate as string, serviceDate)) }))
+    .sort((a, b) => a.d - b.d);
+  if (dated.length === 0) return null;
+  if (dated.length > 1 && dated[1]!.d === dated[0]!.d) return null;
+  return dated[0]!.c;
+}
+
 /** Cascada de filtros. `base` ya excluye ANULADO y clientes distintos de Terpel. */
 export function reconcile(t: TerpelInput, base: SilogCandidate[], p: EngineParams, manualId?: string | null): EngineResult {
   const filters = [...p.filters].sort((a, b) => a.position - b.position);
@@ -209,6 +221,16 @@ export function reconcile(t: TerpelInput, base: SilogCandidate[], p: EngineParam
     return { status: 'NO_MATCH', chosenId: null, candidateIds: [], trace, differences: [], reason: 'No hay registros de Silogtran para comparar', reasonCode: null, weightSource: null };
   }
   if (current.length > 1) {
+    // Desempate por fecha: se elige el despacho más cercano (anterior o igual) a la fecha de Terpel.
+    const closest = closestByDate(current, t.serviceDate);
+    if (closest) {
+      const dist = daysBetween(closest.dispatchDate as string, t.serviceDate as string);
+      trace.push({ filter: 'date', before: current.length, after: 1, mode: 'exclusive', skipped: false, reason: 'closest_date' });
+      return classifySingle(
+        t, closest, trace, infos,
+        `${current.length} candidatos; se eligió el despacho más cercano a la fecha de Terpel (${dist} día${dist === 1 ? '' : 's'} antes)`, zeroMode,
+      );
+    }
     return {
       status: 'AMBIGUOUS', chosenId: null, candidateIds: current.map((c) => c.id), trace, differences: infos,
       reason: `${current.length} candidatos tras todos los filtros; requiere elección manual`, reasonCode: null, weightSource: null,
