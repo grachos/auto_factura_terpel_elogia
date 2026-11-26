@@ -6,7 +6,7 @@ import type { Permission } from '../permissions.js';
 import { silogLogin } from '../silogLogin.js';
 import { buildPlan, createAssistedRun, getAssistedRun, listAssistedRuns, stepAssistedRun } from '../adjust/assisted.js';
 import { generateAssistedExport } from '../adjust/assistedExcel.js';
-import { runDiagnostic } from '../silog/web/diagnostic.js';
+import { runDiagnostic, runInvoiceDiagnostic } from '../silog/web/diagnostic.js';
 import { SilogWebError } from '../silog/web/errors.js';
 import { openWebSession } from '../silog/web/session.js';
 import type { WebPurpose } from '../silog/web/session.js';
@@ -339,6 +339,11 @@ async function dispatchAdjust(
     try {
       const s = await openWebSession({ db: ctx.db, encryptionKey: ctx.config.security.encryptionKey, baseUrl: base, waf: ctx.waf, fetchFn: ctx.webFetch }, purpose, session.userId);
       try {
+        if (body.invoice === true) {
+          const inv = await runInvoiceDiagnostic(s.client, remesa);
+          await audit(ctx.db, session.userId, 'silog_web.diagnostic', 'silog_web_session', purpose, { invoice: true, ok: true });
+          return ok({ ok: true, wafSolved: s.client.wafSolved, reused: s.reused, invoice: inv });
+        }
         const out = await runDiagnostic(s.client, { lookup, search, home: body.home === true, remesa, reused: s.reused });
         await audit(ctx.db, session.userId, 'silog_web.diagnostic', 'silog_web_session', purpose, { lookup, search, ok: true });
         return ok({ ok: true, wafSolved: s.client.wafSolved, ...out });

@@ -239,3 +239,80 @@ export function describeRemesaHome(html: string): HomeDescription {
   });
   return { tables, fields };
 }
+
+export const INVOICE_PAGE = 'index.php?page=Financiero.Factura.Automatica_111';
+
+export interface InvoiceControl {
+  tag: string; type: string | null; name: string | null; id: string | null; value: string | null; checked: boolean | null; disabled: boolean; readOnly: boolean;
+  options?: { value: string; text: string; selected: boolean }[];
+}
+export interface InvoicePageMap {
+  title: string; formAction: string | null; controls: InvoiceControl[]; labelled: { id: string; text: string }[]; tables: HomeTable[]; widgets: WidgetInfo[];
+}
+
+/** Mapa de la pantalla de facturar (solo lectura): controles con valor por defecto, selects con opciones, textos de totales y tablas. */
+export function describeInvoicePage(html: string): InvoicePageMap {
+  const $ = cheerio.load(html);
+  const form = $('form').first();
+  const controls: InvoiceControl[] = [];
+  form.find('input, select, textarea').each((_, el) => {
+    const $el = $(el);
+    const tag = (el as { tagName: string }).tagName;
+    const type = $el.attr('type')?.toLowerCase() ?? null;
+    const name = $el.attr('name') ?? null;
+    if (name && /^PRADO_(PAGESTATE|POSTBACK|CALLBACK)/.test(name)) return;
+    const c: InvoiceControl = {
+      tag, type, name, id: $el.attr('id') ?? null, value: tag === 'textarea' ? $el.text().slice(0, 200) : tag === 'select' ? null : ($el.attr('value') ?? '').slice(0, 120),
+      checked: type === 'checkbox' || type === 'radio' ? $el.is('[checked]') : null, disabled: $el.is('[disabled]'), readOnly: $el.is('[readonly]'),
+    };
+    if (tag === 'select') c.options = $el.find('option').toArray().slice(0, 40).map((o) => ({ value: $(o).attr('value') ?? '', text: $(o).text().trim().slice(0, 60), selected: $(o).is('[selected]') }));
+    controls.push(c);
+  });
+  const labelled = $('span[id], td[id], div[id]').toArray()
+    .filter((e) => /flete|total|impuesto|otros|retefuente|retelca|mensaje|error/i.test($(e).attr('id') ?? ''))
+    .map((e) => ({ id: $(e).attr('id') as string, text: $(e).text().replace(/\s+/g, ' ').trim().slice(0, 120) }))
+    .filter((x) => x.text !== '').slice(0, 40);
+  const tables: HomeTable[] = [];
+  $('table').each((_, t) => {
+    const $t = $(t);
+    const headers = $t.find('th').toArray().map((h) => cellText($(h).text())).filter(Boolean);
+    const rows = $t.find('tr').toArray().map((r) => $(r).children('td').toArray().map((c) => cellText($(c).text()))).filter((r) => r.length > 4 && r.some(Boolean));
+    if (headers.length > 4 || (rows.length > 0 && rows.length <= 40 && /Remesa/i.test($t.text().slice(0, 400)) && rows[0] && rows[0].length >= 8)) tables.push({ id: $t.attr('id') ?? null, headers, rows: rows.slice(0, 5) });
+  });
+  const widgets: WidgetInfo[] = [];
+  for (const m of html.matchAll(/Prado\.WebUI\.(\w+)\(\{([^;]*?)\}\);/g)) {
+    const body = m[2] as string;
+    widgets.push({ cls: m[1] as string, id: pick(body, 'ID') ?? pick(body, 'ControlID'), eventTarget: pick(body, 'EventTarget'), eventName: pick(body, 'EventName') ?? pick(body, 'Event'), validationGroup: pick(body, 'ValidationGroup'), controlToValidate: pick(body, 'ControlToValidate'), errorMessage: null });
+  }
+  return { title: redact($('title').first().text()), formAction: form.attr('action') ?? null, controls, labelled, tables, widgets };
+}
+
+/** Solo el botón «Listar Remesas» puede enviarse en el diagnóstico (jamás Facturar, Preview, Total ni Limpiar). */
+export const isListButton = (c: { type: string | null; name: string | null; id: string | null; value: string | null }): boolean =>
+  c.type === 'submit' && /listar/i.test(`${c.id ?? ''} ${c.name ?? ''} ${c.value ?? ''}`) && !/factur|preview|total|limpiar|emit|generar|grabar/i.test(`${c.id ?? ''} ${c.name ?? ''} ${c.value ?? ''}`);
+
+export interface InvoiceDiagnostic { steps: Step[]; before: InvoicePageMap; after: InvoicePageMap | null }
+
+export async function runInvoiceDiagnostic(client: SilogWebClient, remesa: string): Promise<InvoiceDiagnostic> {
+  const steps: Step[] = [];
+  const page = await client.enqueue(() => client.request(INVOICE_PAGE));
+  if (page.text.includes('ctl0$MainModule$BtnIngresar')) throw new SilogWebError('WEB_BAD_PAGE', 'Silogtran devolvió el login en lugar de la pantalla de facturar (sesión expirada o sin permiso)');
+  const before = describeInvoicePage(page.text);
+  steps.push({ step: 'GET pantalla de facturar', ok: true, detail: { controls: before.controls.length, tables: before.tables.length } });
+  const out: InvoiceDiagnostic = { steps, before, after: null };
+  const comas = before.controls.find((c) => c.tag === 'textarea' && /coma/i.test(`${c.id ?? ''} ${c.name ?? ''}`)) ?? null;
+  const listar = before.controls.find(isListButton) ?? null;
+  steps.push({ step: 'identificar «Búsqueda Por Comas» y «Listar Remesas»', ok: !!(comas?.name && listar?.name), detail: { textarea: comas?.id ?? null, button: listar?.name ?? null } });
+  if (!comas?.name || !listar?.name) return out;
+  await client.enqueue(async () => {
+    const prado = new PradoPage(client, page);
+    prado.fields[comas.name as string] = remesa.padStart(10, '0');
+    const lock = Object.keys(prado.fields).find((k) => /IDLockHidden_.*listar/i.test(k));
+    const extra: Record<string, string> = { PRADO_POSTBACK_PARAMETER: '', [listar.name as string]: listar.value && listar.value !== '' ? listar.value : 'Listar Remesas' };
+    if (lock) extra[lock] = 'true';
+    const res = await prado.postback('', extra);
+    out.after = describeInvoicePage(res.text);
+    steps.push({ step: 'botón «Listar Remesas» (solo lectura; sin Facturar)', ok: true, detail: { tables: out.after.tables.length } });
+  });
+  return out;
+}
