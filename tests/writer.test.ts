@@ -125,6 +125,10 @@ describe('clasificación del mensaje de Grabar', () => {
     const real = 'La remesa #0101228393 fue actualizado con &eacute;xito!';
     expect(classifyGrabarResponse(`<span id="ctl0_MainModule_mensaje">${real}</span>`).verdict).toBe('success');
     expect(classifyGrabarResponse('<span>La remesa #0101228393 fue actualizado con éxito!</span>').verdict).toBe('success');
+    // La página trae identificadores de ruta con «Error» que no son mensajes de error.
+    const withIds = '<script>var k=["Basicos.Error.Buscar","Basicos.Error.Home","Basicos.PlanosMinisterio_2011.ArchivoErrores","Despacho.Manifiesto_003.InformeErroresMinisterio"];</script><span>La remesa #101229389 fue actualizado con &eacute;xito!</span>';
+    expect(classifyGrabarResponse(withIds).verdict).toBe('success');
+    expect(classifyGrabarResponse('<span>Error: no se pudo grabar la remesa</span>').verdict).toBe('error');
     expect(classifyGrabarResponse('<span>LA REMESA #0101228393 FUE ACTUALIZADO CON EXITO!</span>').verdict).toBe('success');
     expect(classifyGrabarResponse('<span>La remesa #0101228393 fue actualizado con &#233;xito!</span>').verdict).toBe('success');
     expect(classifyGrabarResponse(`<script>alert("${real}");</script><p>x</p>`).verdict).toBe('success'); // dentro de un script

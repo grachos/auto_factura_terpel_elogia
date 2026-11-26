@@ -54,6 +54,8 @@ export function classifyGrabarResponse(html: string): { verdict: GrabarVerdict; 
   const lines: string[] = [];
   for (const raw of text) {
     const l = raw.replace(/\s+/g, ' ').trim();
+    // Identificadores de página/ruta (p. ej. «Basicos.Error.Home»), sin espacios, no son mensajes.
+    if (!/\s/.test(l)) continue;
     if (l.length > 6 && l.length < 220 && (GENERIC_OK_RE.test(fold(l)) || ERROR_RE.test(fold(l)) || SUCCESS_RE.test(fold(l)))) lines.push(l.replace(/\b\d{7,}\b/g, '#').slice(0, 160));
   }
   const uniq = [...new Set(lines)];
