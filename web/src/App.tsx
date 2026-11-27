@@ -6,6 +6,7 @@ import { hasSession, initAuth, login, loginSilog, logout } from './auth';
 import { Users } from './Users';
 import { Adjustments } from './Adjustments';
 import { Invoices } from './Invoices';
+import { Activity } from './Activity';
 import type { WriterStatusDto } from '../../core/types';
 import { Reconciliation } from './Reconciliation';
 import { Params } from './Params';
@@ -128,7 +129,7 @@ export function App() {
     })();
   }, [loadMe]);
 
-  if (booting) return <main><p>Cargando…</p></main>;
+  if (booting) return <main><p className="loading"><span className="spinner" aria-hidden="true" /> Cargando…</p><Activity /></main>;
   if (fatal && !me) return <main><div className="alert error" role="alert">{fatal}</div>{cfg && <Login cfg={cfg} onDone={loadMe} />}</main>;
   if (!cfg) return <main><div className="alert error">No se pudo cargar la configuración.</div></main>;
   if (!me) return <Login cfg={cfg} onDone={loadMe} />;
@@ -242,6 +243,7 @@ function Dashboard({ cfg, me, onLogout }: { cfg: PublicConfigDto; me: MeDto; onL
 
   return (
     <>
+      <Activity />
       <header className="top">
         <h1>AutoFactura Terpel <span className="muted">· autorizaciones y conciliación</span></h1>
         <div className="who">

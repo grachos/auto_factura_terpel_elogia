@@ -33,7 +33,29 @@ export function configureAuth(tokenGetter: TokenGetter, unauthorized: () => void
   onUnauthorized = unauthorized;
 }
 
+// Actividad de red en curso: alimenta el indicador global de «procesando».
+let pending = 0;
+const activityListeners = new Set<(n: number) => void>();
+export function subscribeActivity(fn: (n: number) => void): () => void {
+  activityListeners.add(fn);
+  fn(pending);
+  return () => { activityListeners.delete(fn); };
+}
+function bump(d: number): void {
+  pending = Math.max(0, pending + d);
+  activityListeners.forEach((f) => f(pending));
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  bump(1);
+  try {
+    return await requestInner<T>(method, path, body);
+  } finally {
+    bump(-1);
+  }
+}
+
+async function requestInner<T>(method: string, path: string, body?: unknown): Promise<T> {
   const token = await getToken();
   const res = await fetch(path, {
     method,
